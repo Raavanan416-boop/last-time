@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Create or join a MovieTime watch party room">
+  <title>MovieTime – Room</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="room-page">
+    <div class="room-header">
+      <h1>🎬 Movie<span>Time</span></h1>
+      <p>Create a room or join an existing one</p>
+    </div>
+
+    <div class="tabs-container">
+      <!-- ═══ LEVEL 1 TABS: Create / Join ═══ -->
+      <div class="tabs-nav" id="l1Nav">
+        <div class="tab-slider" id="l1Slider"></div>
+        <div class="tab-btn active" data-tab="0">Create Room</div>
+        <div class="tab-btn" data-tab="1">Join Room</div>
+      </div>
+
+      <div class="tabs-viewport" id="l1Viewport">
+        <div class="tabs-track" id="l1Track">
+
+          <!-- ═══ PANEL: CREATE ROOM ═══ -->
+          <div class="tab-panel">
+            <!-- Room Name (shared across Upload / YouTube) -->
+            <div class="glass" style="margin-bottom:16px">
+              <div class="form-group" style="margin-bottom:0">
+                <label for="roomNameInput">Room Name</label>
+                <input type="text" id="roomNameInput" placeholder="My Watch Party" maxlength="40" autocomplete="off">
+              </div>
+            </div>
+
+            <!-- ═══ LEVEL 2 TABS: Upload / YouTube ═══ -->
+            <div class="tabs-nav sub-tabs-nav" id="l2Nav">
+              <div class="tab-slider sub-slider" id="l2Slider"></div>
+              <div class="tab-btn active" data-tab="0">📁 Upload Video</div>
+              <div class="tab-btn" data-tab="1">▶️ YouTube Link</div>
+            </div>
+
+            <div class="tabs-viewport" id="l2Viewport">
+              <div class="tabs-track" id="l2Track">
+
+                <!-- SUB-PANEL: Upload Video (Local Chunked) -->
+                <div class="tab-panel">
+                  <div class="glass">
+                    <div class="form-group">
+                      <label>Select Video File</label>
+                      <div class="file-drop" id="fileDrop">
+                        <input type="file" id="videoFileInput" accept="video/*">
+                        <div class="file-drop-icon">📁</div>
+                        <div class="file-drop-text">Tap or drag a video file here</div>
+                        <div class="file-drop-hint">Supports large files (3+ hours) · Chunked upload</div>
+                        <div class="file-drop-name" id="fileName"></div>
+                        <div class="file-drop-size" id="fileSize"></div>
+                      </div>
+                    </div>
+                    <div class="upload-progress" id="uploadProgress">
+                      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                      <div class="progress-text" id="progressText">Uploading... 0%</div>
+                      <div class="progress-status" id="progressStatus">📡 Preparing upload...</div>
+                      <div class="progress-stats" id="progressStats"></div>
+                    </div>
+                    <!-- Error message area -->
+                    <div class="upload-error" id="uploadError" style="display:none">
+                      <span class="error-icon">⚠️</span>
+                      <div>
+                        <span class="error-text" id="uploadErrorText"></span>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <button class="btn-primary" id="createUploadBtn">🎬 Create Room</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- SUB-PANEL: YouTube Link -->
+                <div class="tab-panel">
+                  <div class="glass">
+                    <div class="form-group">
+                      <label for="youtubeInput">YouTube URL</label>
+                      <input type="url" id="youtubeInput" placeholder="https://youtube.com/watch?v=..." autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                      <button class="btn-primary" id="createYTBtn">▶️ Create Room</button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <!-- ═══ PANEL: JOIN ROOM ═══ -->
+          <div class="tab-panel">
+            <div class="glass">
+              <div class="form-group">
+                <label for="roomIdInput">Room ID</label>
+                <input type="text" id="roomIdInput" placeholder="Enter Room ID" maxlength="10" autocomplete="off" style="text-transform:uppercase">
+              </div>
+              <div class="form-group">
+                <button class="btn-primary" id="joinBtn">🚀 Join Room</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ── Guard: username required ── */
+    const username = localStorage.getItem('mt_username');
+    if (!username) window.location.href = 'index.html';
+
+    /* ════════════════════════════════════════
+       REUSABLE SWIPE-TAB CONTROLLER
+       ════════════════════════════════════════ */
+    function createTabController(navId, sliderId, trackId, viewportId) {
+      const nav      = document.getElementById(navId);
+      const slider   = document.getElementById(sliderId);
+      const track    = document.getElementById(trackId);
+      const viewport = document.getElementById(viewportId);
+      const btns     = nav.querySelectorAll('.tab-btn');
+      let active = 0;
+
+      function set(index) {
+        active = index;
+        track.style.transform = `translateX(-${index * 50}%)`;
+        slider.classList.toggle('right', index === 1);
+        btns.forEach((b, i) => b.classList.toggle('active', i === index));
+      }
+
+      btns.forEach(b => b.addEventListener('click', () => set(+b.dataset.tab)));
+
+      let sx = 0, sy = 0, dragging = false;
+      viewport.addEventListener('touchstart', e => {
+        sx = e.touches[0].clientX; sy = e.touches[0].clientY; dragging = true;
+      }, { passive: true });
+      viewport.addEventListener('touchend', e => {
+        if (!dragging) return; dragging = false;
+        const dx = e.changedTouches[0].clientX - sx;
+        const dy = e.changedTouches[0].clientY - sy;
+        if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+          if (dx < 0 && active === 0) set(1);
+          else if (dx > 0 && active === 1) set(0);
+        }
+      }, { passive: true });
+
+      return { set, getActive: () => active };
+    }
+
+    const l1 = createTabController('l1Nav', 'l1Slider', 'l1Track', 'l1Viewport');
+    const l2 = createTabController('l2Nav', 'l2Slider', 'l2Track', 'l2Viewport');
+
+    /* ════════════ ERROR DISPLAY ════════════ */
+    function showUploadError(msg) {
+      const errEl   = document.getElementById('uploadError');
+      const errText = document.getElementById('uploadErrorText');
+      errText.textContent = msg;
+      errEl.style.display = 'flex';
+      setTimeout(() => { errEl.style.display = 'none'; }, 12000);
+    }
+
+    function hideUploadError() {
+      document.getElementById('uploadError').style.display = 'none';
+    }
+
+    /* ════════════ FILE INPUT ════════════ */
+    const videoFileInput = document.getElementById('videoFileInput');
+    const fileDrop = document.getElementById('fileDrop');
+    const fileNameEl = document.getElementById('fileName');
+    const fileSizeEl = document.getElementById('fileSize');
+
+    function formatFileSize(bytes) {
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    }
+
+    videoFileInput.addEventListener('change', () => {
+      hideUploadError();
+      if (videoFileInput.files[0]) {
+        const file = videoFileInput.files[0];
+        fileDrop.classList.add('has-file');
+        fileNameEl.textContent = file.name;
+        fileSizeEl.textContent = formatFileSize(file.size);
+      } else {
+        fileDrop.classList.remove('has-file');
+        fileNameEl.textContent = '';
+        fileSizeEl.textContent = '';
+      }
+    });
+
+    /* ════════════════════════════════════════
+       CHUNKED UPLOAD SYSTEM
+       ════════════════════════════════════════ */
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB per chunk
+
+    async function uploadFileChunked(file, onProgress) {
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+      // Step 1: Start upload session
+      const startRes = await fetch('/api/upload/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileSize: file.size,
+          totalChunks
+        })
+      });
+
+      if (!startRes.ok) {
+        const err = await startRes.json();
+        throw new Error(err.error || 'Failed to start upload');
+      }
+
+      const { sessionId } = await startRes.json();
+
+      // Step 2: Upload chunks one by one
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end   = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+
+        const chunkRes = await fetch('/api/upload/chunk', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-Session-Id': sessionId,
+            'X-Chunk-Index': i.toString()
+          },
+          body: chunk
+        });
+
+        if (!chunkRes.ok) {
+          const err = await chunkRes.json();
+          throw new Error(err.error || `Chunk ${i + 1} failed`);
+        }
+
+        const result = await chunkRes.json();
+        
+        // Report progress
+        const progress = Math.round(((i + 1) / totalChunks) * 100);
+        const uploaded = Math.min((i + 1) * CHUNK_SIZE, file.size);
+        onProgress({
+          progress,
+          uploaded,
+          total: file.size,
+          chunk: i + 1,
+          totalChunks,
+          complete: result.status === 'complete'
+        });
+
+        if (result.status === 'complete') break;
+      }
+
+      return sessionId;
+    }
+
+    /* ════════════ CREATE: UPLOAD (Chunked) ════════════ */
+    document.getElementById('createUploadBtn').addEventListener('click', async () => {
+      const roomName = document.getElementById('roomNameInput').value.trim();
+      if (!roomName) {
+        document.getElementById('roomNameInput').classList.add('shake');
+        setTimeout(() => document.getElementById('roomNameInput').classList.remove('shake'), 500);
+        return;
+      }
+      const file = videoFileInput.files[0];
+      if (!file) {
+        fileDrop.classList.add('shake');
+        setTimeout(() => fileDrop.classList.remove('shake'), 500);
+        return;
+      }
+
+      const btn    = document.getElementById('createUploadBtn');
+      const prog   = document.getElementById('uploadProgress');
+      const fill   = document.getElementById('progressFill');
+      const txt    = document.getElementById('progressText');
+      const status = document.getElementById('progressStatus');
+      const stats  = document.getElementById('progressStats');
+
+      btn.disabled = true;
+      btn.textContent = '⏳ Uploading...';
+      hideUploadError();
+      prog.classList.add('visible');
+      fill.style.width = '0%';
+      txt.textContent  = 'Uploading... 0%';
+      status.textContent = '📡 Starting chunked upload...';
+      stats.textContent = '';
+
+      const startTime = Date.now();
+
+      try {
+        const sessionId = await uploadFileChunked(file, ({ progress, uploaded, total, chunk, totalChunks, complete }) => {
+          fill.style.width = progress + '%';
+          txt.textContent  = `Uploading... ${progress}%`;
+
+          const elapsed = (Date.now() - startTime) / 1000;
+          const speed   = uploaded / elapsed;
+          const remaining = (total - uploaded) / speed;
+
+          const speedStr = speed > 1024 * 1024
+            ? (speed / (1024 * 1024)).toFixed(1) + ' MB/s'
+            : (speed / 1024).toFixed(0) + ' KB/s';
+
+          const remainStr = remaining > 60
+            ? Math.ceil(remaining / 60) + ' min'
+            : Math.ceil(remaining) + 's';
+
+          status.textContent = `📦 Chunk ${chunk}/${totalChunks} · ${formatFileSize(uploaded)} / ${formatFileSize(total)}`;
+          stats.textContent  = complete ? '✅ Upload complete!' : `⚡ ${speedStr} · ~${remainStr} remaining`;
+        });
+
+        // Step 3: Create room with the uploaded session
+        txt.textContent    = 'Creating room...';
+        status.textContent = '✅ Upload complete! Setting up room...';
+        stats.textContent  = '';
+        fill.style.width   = '100%';
+
+        const res = await fetch('/api/create-room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomName, videoType: 'file', uploadSessionId: sessionId })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          window.location.href = `player.html?room=${data.roomId}`;
+        } else {
+          showUploadError(data.error || 'Failed to create room');
+          resetUploadBtn(btn, prog);
+        }
+      } catch (err) {
+        showUploadError(err.message || 'Upload failed. Please try again.');
+        resetUploadBtn(btn, prog);
+      }
+    });
+
+    function resetUploadBtn(btn, prog) {
+      btn.disabled    = false;
+      btn.textContent = '🎬 Create Room';
+      prog.classList.remove('visible');
+    }
+
+    /* ════════════ CREATE: YOUTUBE ════════════ */
+    document.getElementById('createYTBtn').addEventListener('click', async () => {
+      const roomName = document.getElementById('roomNameInput').value.trim();
+      if (!roomName) {
+        alert('Please enter your room name');
+        document.getElementById('roomNameInput').classList.add('shake');
+        setTimeout(() => document.getElementById('roomNameInput').classList.remove('shake'), 500);
+        return;
+      }
+      const ytUrl = document.getElementById('youtubeInput').value.trim();
+      if (!ytUrl) {
+        document.getElementById('youtubeInput').classList.add('shake');
+        setTimeout(() => document.getElementById('youtubeInput').classList.remove('shake'), 500);
+        return;
+      }
+
+      const btn = document.getElementById('createYTBtn');
+      btn.disabled = true;
+      btn.textContent = '⏳ Creating...';
+
+      try {
+        const res = await fetch('/api/create-room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomName, videoType: 'youtube', youtubeUrl: ytUrl })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          window.location.href = `player.html?room=${data.roomId}`;
+        } else {
+          alert(data.error || 'Failed to create room');
+          btn.disabled = false;
+          btn.textContent = '▶️ Create Room';
+        }
+      } catch {
+        alert('Network error. Please try again.');
+        btn.disabled = false;
+        btn.textContent = '▶️ Create Room';
+      }
+    });
+
+    /* ════════════ JOIN ROOM ════════════ */
+    document.getElementById('joinBtn').addEventListener('click', async () => {
+      const roomId = document.getElementById('roomIdInput').value.trim().toUpperCase();
+      if (!roomId) {
+        document.getElementById('roomIdInput').classList.add('shake');
+        setTimeout(() => document.getElementById('roomIdInput').classList.remove('shake'), 500);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/room/${roomId}`);
+        if (res.ok) window.location.href = `player.html?room=${roomId}`;
+        else alert('Room not found');
+      } catch { alert('Network error'); }
+    });
+    document.getElementById('roomIdInput').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('joinBtn').click(); });
+  </script>
+</body>
+</html>

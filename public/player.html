@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="MovieTime Watch Party Player">
+  <title>MovieTime – Player</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="player-page" id="playerPage">
+    <!-- TOP BAR -->
+    <div class="player-top-bar">
+      <div class="top-bar-left">
+        <div class="top-bar-logo">🎬 Movie<span>Time</span></div>
+        <div class="room-badge">
+          Room: <code id="roomIdDisplay">---</code>
+          <button class="copy-btn" id="copyBtn" title="Copy Room ID">📋</button>
+        </div>
+      </div>
+      <div class="top-bar-right">
+        <div class="user-count"><span class="dot"></span> <span id="userCountEl">0</span> watching</div>
+        <div class="emoji-btn-wrap">
+          <button class="icon-btn" id="emojiBtn" title="React">😊</button>
+          <div class="emoji-panel" id="emojiPanel">
+            <span class="emoji-pick" data-emoji="👍">👍</span>
+            <span class="emoji-pick" data-emoji="❤️">❤️</span>
+            <span class="emoji-pick" data-emoji="😂">😂</span>
+            <span class="emoji-pick" data-emoji="😮">😮</span>
+            <span class="emoji-pick" data-emoji="😢">😢</span>
+            <span class="emoji-pick" data-emoji="🔥">🔥</span>
+            <span class="emoji-pick" data-emoji="👏">👏</span>
+          </div>
+        </div>
+        <button class="icon-btn" id="usersBtn" title="Users">👥</button>
+        <button class="icon-btn danger" id="leaveBtn" title="Leave Room">🚪</button>
+      </div>
+    </div>
+
+    <!-- MAIN (video only — no chat sidebar) -->
+    <div class="player-main">
+      <div class="player-col">
+        <div class="video-wrap" id="videoWrap">
+          <div class="sync-toast" id="syncToast"></div>
+          <div class="emoji-float-container" id="emojiFloatContainer"></div>
+        </div>
+        <div class="room-info-strip">
+          <div class="room-name" id="roomNameEl">Watch Party</div>
+          <div class="username-badge" id="usernameEl"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ FLOATING CHAT BUTTON ═══ -->
+  <button class="chat-fab" id="chatFab">
+    💬
+    <span class="chat-fab-badge" id="chatBadge"></span>
+  </button>
+
+  <!-- ═══ SLIDE-IN CHAT/VOICE PANEL ═══ -->
+  <div class="panel-overlay" id="panelOverlay"></div>
+  <div class="chat-panel" id="chatPanel">
+    <!-- Panel header with close -->
+    <div class="panel-header">
+      <span class="panel-title">Chat & Voice</span>
+      <button class="panel-close" id="panelClose">✕</button>
+    </div>
+
+    <!-- Panel tabs: Chat | Voice -->
+    <div class="panel-tabs-nav" id="panelNav">
+      <div class="tab-slider panel-tab-slider" id="panelSlider"></div>
+      <div class="tab-btn active" data-tab="0">💬 Chat</div>
+      <div class="tab-btn" data-tab="1">🎙️ Voice</div>
+    </div>
+
+    <!-- Swipeable tab content -->
+    <div class="panel-tabs-viewport" id="panelViewport">
+      <div class="panel-tabs-track" id="panelTrack">
+
+        <!-- CHAT TAB -->
+        <div class="panel-tab-content">
+          <div class="chat-messages" id="chatMessages"></div>
+          <div class="chat-input-wrap">
+            <input type="text" id="chatInput" placeholder="Type a message..." maxlength="500" autocomplete="off">
+            <button class="chat-send-btn" id="chatSendBtn">Send</button>
+          </div>
+        </div>
+
+        <!-- VOICE TAB -->
+        <div class="panel-tab-content">
+          <div class="voice-tab-content">
+            <!-- Global voice controls -->
+            <div class="voice-global-controls">
+              <button class="voice-ctrl-btn" id="micBtn" title="Toggle Mic">
+                <span class="vc-icon">🎤</span>
+                <span class="vc-label">Mic On</span>
+              </button>
+              <button class="voice-ctrl-btn" id="speakerBtn" title="Toggle All Audio">
+                <span class="vc-icon">🔊</span>
+                <span class="vc-label">Speaker On</span>
+              </button>
+            </div>
+            <!-- Voice user list -->
+            <div class="voice-user-list" id="voiceUserList"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- USER LIST POPUP -->
+  <div class="popup-overlay" id="usersPopup">
+    <div class="popup-card" style="position:relative">
+      <h3>👥 Users in Room</h3>
+      <button class="close-popup" id="closeUsersPopup">✕</button>
+      <div id="userListContainer"></div>
+    </div>
+  </div>
+
+  <!-- LEAVE POPUP -->
+  <div class="popup-overlay leave-popup" id="leavePopup">
+    <div class="popup-card" style="position:relative">
+      <h3>Leave Room?</h3>
+      <p>Are you sure you want to leave the watch party?</p>
+      <div class="btn-row">
+        <button class="btn-secondary" id="continueBtn">Continue Watching</button>
+        <button class="btn-primary" id="confirmLeaveBtn" style="width:auto;padding:12px 24px">Leave Room</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- YouTube API -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

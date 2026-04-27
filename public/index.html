@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="MovieTime Watch Party - Watch videos together in real-time">
+  <title>MovieTime – Watch Party</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Landing page -->
+  <div class="landing">
+    <div class="landing-bg"></div>
+    <div class="landing-content">
+      <div class="logo-wrap">
+        <span class="logo-icon">🎬</span>
+        <h1 class="logo-text">Movie<span>Time</span></h1>
+      </div>
+      <p class="tagline">Watch together. Anywhere.</p>
+
+      <div class="name-card glass">
+        <label for="usernameInput">Choose your display name</label>
+        <input type="text" id="usernameInput" placeholder="Enter username" maxlength="20" autocomplete="off">
+        <button id="enterBtn" class="btn-primary">Enter Party</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('enterBtn').addEventListener('click', () => {
+      const name = document.getElementById('usernameInput').value.trim();
+      if (!name) { document.getElementById('usernameInput').classList.add('shake'); setTimeout(()=>document.getElementById('usernameInput').classList.remove('shake'),500); return; }
+      localStorage.setItem('mt_username', name);
+      window.location.href = 'room.html';
+    });
+    document.getElementById('usernameInput').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('enterBtn').click(); });
+  </script>
+</body>
+</html>
