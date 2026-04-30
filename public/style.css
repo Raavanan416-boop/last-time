@@ -154,19 +154,26 @@ label{display:block;color:var(--text2);font-size:.82rem;font-weight:600;margin-b
 .video-wrap{position:relative;width:100%;background:#000;flex-shrink:0;overflow:hidden}
 .video-wrap video,.video-wrap iframe{width:100%;aspect-ratio:16/9;display:block;background:#000;max-height:80vh}
 .video-wrap iframe{border:none}
-.sync-toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:var(--text);padding:6px 16px;border-radius:20px;font-size:.8rem;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+
+/* ── Overlay UI (persists in fullscreen) ── */
+.overlay-ui{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  pointer-events:none;z-index:30;
+}
+
+.sync-toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:var(--text);padding:6px 16px;border-radius:20px;font-size:.8rem;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;z-index:32}
 .sync-toast.show{opacity:1}
 
-/* ── Chat toast notification (top of video) ── */
+/* ── Chat toast notification (top of video — inside overlay-ui for fullscreen) ── */
 .chat-toast{
-  position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:25;
-  background:rgba(0,0,0,.75);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-  color:#fff;padding:8px 20px;border-radius:24px;
-  font-size:.82rem;font-weight:600;letter-spacing:.2px;
+  position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:35;
+  background:rgba(0,0,0,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  color:#fff;padding:10px 22px;border-radius:24px;
+  font-size:.85rem;font-weight:600;letter-spacing:.2px;
   opacity:0;transition:opacity .35s ease,transform .35s ease;
   pointer-events:none;white-space:nowrap;max-width:80%;overflow:hidden;text-overflow:ellipsis;
-  border:1px solid rgba(255,255,255,.1);
-  box-shadow:0 4px 20px rgba(0,0,0,.5);
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 4px 24px rgba(0,0,0,.6);
   transform:translateX(-50%) translateY(-8px);
 }
 .chat-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -187,8 +194,8 @@ label{display:block;color:var(--text2);font-size:.82rem;font-weight:600;margin-b
 .emoji-pick:hover{background:rgba(229,9,20,.12);transform:scale(1.25)}
 .emoji-pick:active{transform:scale(.9)}
 
-/* ── Floating emoji animation ── */
-.emoji-float-container{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:20}
+/* ── Floating emoji animation (inside overlay-ui for fullscreen) ── */
+.emoji-float-container{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:31}
 .emoji-float-group{
   position:absolute;bottom:50px;pointer-events:none;
   display:flex;flex-direction:column;align-items:center;gap:2px;
@@ -211,6 +218,11 @@ label{display:block;color:var(--text2);font-size:.82rem;font-weight:600;margin-b
 .msg-time{display:block;font-size:.65rem;margin-top:4px;opacity:.55;font-weight:500}
 .msg.mine .msg-time{text-align:right;color:rgba(255,255,255,.5)}
 .msg.other .msg-time{color:var(--text3)}
+
+/* ── Message seen ticks (✓ / ✓✓) ── */
+.msg-status{display:inline-block;font-size:.7rem;margin-left:6px;vertical-align:middle;font-weight:600;letter-spacing:-1px}
+.msg-status.sent{color:rgba(255,255,255,.45)}
+.msg-status.seen{color:#4fc3f7}
 
 /* Room info strip */
 .room-info-strip{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--bg2);border-bottom:1px solid var(--border)}
@@ -509,4 +521,32 @@ label{display:block;color:var(--text2);font-size:.82rem;font-weight:600;margin-b
 .video-wrap:fullscreen .video-overlay-controls,
 .video-wrap:-webkit-full-screen .video-overlay-controls{
   bottom:60px;
+}
+
+/* ── Fullscreen: overlay-ui persists (toast + emoji visible) ── */
+.video-wrap:fullscreen .overlay-ui,
+.video-wrap:-webkit-full-screen .overlay-ui{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  pointer-events:none;z-index:2147483647;
+}
+.video-wrap:fullscreen .chat-toast,
+.video-wrap:-webkit-full-screen .chat-toast{
+  z-index:2147483647;font-size:1rem;padding:12px 28px;
+  max-width:70%;top:20px;
+}
+.video-wrap:fullscreen .emoji-float-container,
+.video-wrap:-webkit-full-screen .emoji-float-container{
+  z-index:2147483646;
+}
+.video-wrap:fullscreen .sync-toast,
+.video-wrap:-webkit-full-screen .sync-toast{
+  z-index:2147483647;top:20px;
+}
+.video-wrap:fullscreen .emoji-float-group .ef-emoji,
+.video-wrap:-webkit-full-screen .emoji-float-group .ef-emoji{
+  font-size:3rem;
+}
+.video-wrap:fullscreen .emoji-float-group .ef-label,
+.video-wrap:-webkit-full-screen .emoji-float-group .ef-label{
+  font-size:.85rem;padding:3px 10px;
 }

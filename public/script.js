@@ -366,6 +366,7 @@ function addChatMsg(data) {
     div.textContent = data.message;
   } else {
     div.className = `msg ${isMine ? 'mine' : 'other'}`;
+    if (data.id) div.dataset.msgId = data.id;
     const u = document.createElement('div');
     u.className = 'msg-user';
     u.textContent = data.username;
@@ -376,27 +377,55 @@ function addChatMsg(data) {
     const ts = document.createElement('span');
     ts.className = 'msg-time';
     ts.textContent = formatTime(data.timestamp || Date.now());
+    // Seen tick for own messages
+    if (isMine && data.id) {
+      const tick = document.createElement('span');
+      tick.className = 'msg-status sent';
+      tick.id = 'tick-' + data.id;
+      tick.textContent = ' \u2713';
+      ts.appendChild(tick);
+    }
     div.appendChild(ts);
     if (!isMine) {
       incrementBadge();
-      // Show toast notification on top of video
       showTopToast({ user: data.username, message: data.message });
+      // Send seen acknowledgement
+      if (data.id) {
+        socket.emit('message-seen', { messageId: data.id, roomId: ROOM_ID });
+      }
     }
   }
   chatMessages.appendChild(div);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-/* -- Top Toast Notification (chat messages on top of video) -- */
+/* -- Seen tick handler -- */
+socket.on('message-seen', ({ messageId }) => {
+  const tick = document.getElementById('tick-' + messageId);
+  if (tick) {
+    tick.textContent = ' \u2713\u2713';
+    tick.className = 'msg-status seen';
+  }
+});
+
+/* -- Top Toast Notification (queued, visible in fullscreen) -- */
 function showTopToast(data) {
+  chatToastQueue.push(data);
+  if (!chatToastShowing) processToastQueue();
+}
+function processToastQueue() {
+  if (chatToastQueue.length === 0) { chatToastShowing = false; return; }
+  chatToastShowing = true;
+  const data = chatToastQueue.shift();
   const toast = document.getElementById('chatToast');
-  if (!toast) return;
+  if (!toast) { chatToastShowing = false; return; }
   toast.textContent = data.user + ': ' + data.message;
   toast.classList.add('show');
   clearTimeout(chatToastTimer);
   chatToastTimer = setTimeout(() => {
     toast.classList.remove('show');
-  }, 3000);
+    setTimeout(() => processToastQueue(), 300);
+  }, 2500);
 }
 
 function sendChat() {
@@ -871,6 +900,9 @@ async function startScreenShare() {
     currentUsers.forEach(u => {
       if (u.id !== socket.id) createScreenPeerForViewer(u.id);
     });
+
+    // Start adaptive lag monitoring
+    startLagMonitor();
   } catch (err) {
     console.error('Stream start failed:', err);
     ssStatus.textContent = '\u274C Failed to start - ' + (err.message || 'try again');
@@ -881,11 +913,14 @@ async function startScreenShare() {
 function stopScreenShare() {
   if (ssLocalVideo) { ssLocalVideo.pause(); ssLocalVideo.onended = null; }
 
+  // Stop lag monitor
+  if (lagCheckInterval) { clearInterval(lagCheckInterval); lagCheckInterval = null; }
+
   // Close all screen peer connections
   Object.values(screenPeerConnections).forEach(pc => { try { pc.close(); } catch {} });
   Object.keys(screenPeerConnections).forEach(k => delete screenPeerConnections[k]);
 
-  screenStream = null; // Don't stop tracks � they belong to captureStream/video element
+  screenStream = null; // Don't stop tracks  they belong to captureStream/video element
 
   startScreenShareBtn.style.display = 'inline-flex';
   stopScreenShareBtn.style.display = 'none';
@@ -1135,9 +1170,9 @@ async function applyBitrate(pc) {
     const effectiveQuality = performanceMode ? 'smooth' : currentQuality;
     const preset = QUALITY_PRESETS[effectiveQuality] || QUALITY_PRESETS.auto;
 
-    // Cap bitrate for smooth streaming (prevents stutter)
-    const maxAllowedBitrate = isMobile ? 1000000 : 1500000;
-    params.encodings[0].maxBitrate = Math.min(preset.maxBitrate, maxAllowedBitrate);
+    // Performance safety: cap at 3 Mbps max for stability
+    const MAX_SAFE_BITRATE = 3000000;
+    params.encodings[0].maxBitrate = Math.min(preset.maxBitrate, MAX_SAFE_BITRATE);
     params.encodings[0].scaleResolutionDownBy = preset.scaleDown || 1.0;
     // Limit max framerate for stability
     params.encodings[0].maxFramerate = isMobile ? 15 : 24;
@@ -1151,6 +1186,27 @@ async function applyBitrate(pc) {
   } catch (err) {
     console.warn('Failed to set bitrate:', err);
   }
+}
+
+/* Adaptive fallback: auto-downgrade quality if lag detected */
+let lagCheckInterval = null;
+function startLagMonitor() {
+  if (lagCheckInterval) return;
+  lagCheckInterval = setInterval(async () => {
+    for (const pc of Object.values(screenPeerConnections)) {
+      try {
+        const stats = await pc.getStats();
+        stats.forEach(report => {
+          if (report.type === 'outbound-rtp' && report.kind === 'video') {
+            if (report.qualityLimitationReason === 'bandwidth' && currentQuality !== 'low') {
+              console.warn('[Perf] Bandwidth limited, auto-downgrading quality');
+              changeQuality('low');
+            }
+          }
+        });
+      } catch {}
+    }
+  }, 8000);
 }
 
 function changeQuality(quality) {
@@ -1171,7 +1227,23 @@ function changeQuality(quality) {
   const qp = document.getElementById('qualityPanel');
   if (qp) qp.classList.remove('show');
   showSyncToast(`Quality: ${preset.label}`);
+  // Sync quality to all users in room
+  socket.emit('quality-change', { roomId: ROOM_ID, quality });
 }
+
+/* -- Quality sync: receive quality change from another user -- */
+socket.on('quality-change', ({ quality, from }) => {
+  currentQuality = quality;
+  performanceMode = (quality === 'smooth');
+  const preset = QUALITY_PRESETS[quality] || QUALITY_PRESETS.auto;
+  // Apply to all active screen peer connections
+  Object.values(screenPeerConnections).forEach(pc => applyBitrate(pc));
+  updateQualityBadge();
+  document.querySelectorAll('.quality-option').forEach(opt => {
+    opt.classList.toggle('active', opt.dataset.quality === quality);
+  });
+  showSyncToast(`${from} changed quality to ${preset.label}`);
+});
 
 function updateQualityBadge() {
   const badge = document.getElementById('qualityBadge');
@@ -1182,9 +1254,10 @@ function updateQualityBadge() {
   badge.className = 'quality-badge ' + (preset.badge === 'HD' ? 'hd' : 'sd');
 }
 
-/* ═══════════ FULLSCREEN ═══════════ */
+/* ═══════════ FULLSCREEN (uses videoWrap for overlay persistence) ═══════════ */
 function toggleFullscreen() {
-  const target = document.getElementById('screenVideo') || videoEl;
+  // Fullscreen the container (videoWrap) so overlay-ui (toast, emoji) persists
+  const target = videoWrap;
   if (!target) return;
 
   if (document.fullscreenElement || document.webkitFullscreenElement) {

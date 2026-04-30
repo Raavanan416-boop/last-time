@@ -54,6 +54,7 @@ app.use(express.json({ limit: '1mb' }));
 //   timeout        : NodeJS.Timeout | null — auto-delete timer
 // }
 const rooms = {};
+let messageCounter = 0; // Global counter for unique message IDs
 
 // ── Active upload sessions ───────────────────────────────────────────────────
 // uploadSessions[sessionId] = {
@@ -600,18 +601,34 @@ io.on('connection', (socket) => {
 
   // ── Chat ───────────────────────────────────────────────────────────────────
   socket.on('chat-message', ({ roomId, message }) => {
+    messageCounter++;
+    const msgId = `msg_${Date.now()}_${messageCounter}`;
     io.to(roomId).emit('chat-message', {
+      id        : msgId,
       username  : socket.username,
       message,
       senderId  : socket.id,
-      timestamp : Date.now()
+      timestamp : Date.now(),
+      seen      : false
     });
+  });
+
+  // ── Message Seen Tick ──────────────────────────────────────────────────────
+  socket.on('message-seen', ({ messageId, roomId }) => {
+    // Broadcast seen status to all users in the room
+    socket.to(roomId).emit('message-seen', { messageId, seenBy: socket.id });
   });
 
   // ── Emoji reactions ────────────────────────────────────────────────────────
   socket.on('emoji-reaction', ({ roomId, emoji }) => {
     // Broadcast to ALL users in room (including sender for reliable delivery)
     io.to(roomId).emit('emoji-reaction', { username: socket.username, emoji, senderId: socket.id });
+  });
+
+  // ── Quality Sync (creator changes quality → all users apply) ───────────────
+  socket.on('quality-change', ({ roomId, quality }) => {
+    // Broadcast to ALL other users in room
+    socket.to(roomId).emit('quality-change', { quality, from: socket.username });
   });
 
   // ══════════ SCREEN SHARE SIGNALING ══════════
