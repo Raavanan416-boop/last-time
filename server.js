@@ -1,7 +1,7 @@
 /**
  * MovieTime Watch Party — Server
  * ─────────────────────────────────────────────────────────────────────────────
- * Express + Socket.io — Local Chunked Upload + Range Streaming
+ * Express + Socket.io — Local Chunked Upload + Range Streaming + Screen Share
  *
  * ✅ Chunked upload (5 MB chunks) — handles 3+ hour videos
  * ✅ HTTP Range streaming (206 Partial Content)
@@ -9,6 +9,7 @@
  * ✅ Auto-delete: video end / all users leave / timeout
  * ✅ No direct file path exposure — /video/:token route only
  * ✅ Download blocked: Content-Disposition inline + nodownload
+ * ✅ Screen Share via WebRTC (peer-to-peer)
  */
 
 require('dotenv').config();
@@ -41,13 +42,15 @@ app.use(express.json({ limit: '1mb' }));
 
 // ── Rooms storage ─────────────────────────────────────────────────────────────
 // rooms[roomId] = {
-//   name        : string,
-//   videoType   : 'file' | 'youtube',
-//   videoFile   : string   — filename in uploads/    (file only)
-//   videoToken  : string   — secure token for streaming (file only)
-//   videoId     : string   — YouTube video ID          (youtube only)
-//   users       : [{ id, username }],
-//   timeout     : NodeJS.Timeout | null — auto-delete timer
+//   name           : string,
+//   videoType      : 'file' | 'youtube' | 'screen',
+//   videoFile      : string   — filename in uploads/    (file only)
+//   videoToken     : string   — secure token for streaming (file only)
+//   videoId        : string   — YouTube video ID          (youtube only)
+//   creatorId      : string   — socket id of creator      (screen only)
+//   screenActive   : boolean  — is screen share active?   (screen only)
+//   users          : [{ id, username }],
+//   timeout        : NodeJS.Timeout | null — auto-delete timer
 // }
 const rooms = {};
 
@@ -322,8 +325,21 @@ app.post('/api/create-room', (req, res) => {
       console.log(`✓ Room ${roomId} created (youtube → ${videoId})`);
       res.json({ roomId, videoType: 'youtube', videoId });
 
+    } else if (videoType === 'screen') {
+      // Screen share room — no video file, just WebRTC
+      rooms[roomId] = {
+        name,
+        videoType: 'screen',
+        creatorId: null, // Set when creator joins via socket
+        screenActive: false,
+        users: [],
+        timeout: null
+      };
+      console.log(`✓ Room ${roomId} created (screen share)`);
+      res.json({ roomId, videoType: 'screen' });
+
     } else {
-      return res.status(400).json({ error: 'Provide an uploaded video or YouTube URL' });
+      return res.status(400).json({ error: 'Provide an uploaded video, YouTube URL, or select Screen Share' });
     }
   } catch (err) {
     console.error('Create room error:', err);
@@ -336,11 +352,12 @@ app.get('/api/room/:roomId', (req, res) => {
   const room = rooms[req.params.roomId.toUpperCase()];
   if (!room) return res.status(404).json({ error: 'Room not found' });
   res.json({
-    name      : room.name,
-    videoType : room.videoType,
-    videoToken: room.videoToken || null,
-    videoId   : room.videoId   || null,
-    userCount : room.users.length
+    name         : room.name,
+    videoType    : room.videoType,
+    videoToken   : room.videoToken || null,
+    videoId      : room.videoId   || null,
+    screenActive : room.screenActive || false,
+    userCount    : room.users.length
   });
 });
 
@@ -438,7 +455,7 @@ io.on('connection', (socket) => {
   console.log(`⚡ Socket connected: ${socket.id}`);
 
   // ── Join room ──────────────────────────────────────────────────────────────
-  socket.on('join-room', ({ roomId, username }) => {
+  socket.on('join-room', ({ roomId, username, isScreenCreator }) => {
     roomId = roomId.toUpperCase();
     const room = rooms[roomId];
     if (!room) { socket.emit('error-msg', 'Room not found'); return; }
@@ -448,6 +465,12 @@ io.on('connection', (socket) => {
     socket.username  = username;
 
     room.users.push({ id: socket.id, username });
+
+    // If this is a screen share room and the user is the creator
+    if (room.videoType === 'screen' && isScreenCreator && !room.creatorId) {
+      room.creatorId = socket.id;
+      console.log(`🖥️ Screen share creator set: ${username} (${socket.id}) in room ${roomId}`);
+    }
 
     // Clear auto-delete timeout since someone is watching
     if (room.timeout) {
@@ -463,12 +486,15 @@ io.on('connection', (socket) => {
 
     // Send all room data to the joining user
     socket.emit('room-info', {
-      name       : room.name,
-      videoType  : room.videoType,
-      videoToken : room.videoToken || null,
-      videoId    : room.videoId    || null,
-      users      : room.users,
-      userCount  : room.users.length
+      name         : room.name,
+      videoType    : room.videoType,
+      videoToken   : room.videoToken || null,
+      videoId      : room.videoId    || null,
+      users        : room.users,
+      userCount    : room.users.length,
+      isCreator    : room.videoType === 'screen' && room.creatorId === socket.id,
+      screenActive : room.screenActive || false,
+      creatorId    : room.creatorId || null
     });
 
     console.log(`→ ${username} joined room ${roomId} (${room.users.length} users)`);
@@ -501,10 +527,71 @@ io.on('connection', (socket) => {
 
   // ── Emoji reactions ────────────────────────────────────────────────────────
   socket.on('emoji-reaction', ({ roomId, emoji }) => {
+    // Broadcast to ALL users in room (including sender for reliable delivery)
     io.to(roomId).emit('emoji-reaction', { username: socket.username, emoji, senderId: socket.id });
   });
 
-  // ── WebRTC signaling ───────────────────────────────────────────────────────
+  // ══════════ SCREEN SHARE SIGNALING ══════════
+
+  // ── Start screen share ─────────────────────────────────────────────────────
+  socket.on('start-screen-share', ({ roomId }) => {
+    roomId = roomId?.toUpperCase();
+    const room = rooms[roomId];
+    if (!room || room.videoType !== 'screen') return;
+    if (room.creatorId !== socket.id) return; // Only creator can start
+
+    room.screenActive = true;
+    console.log(`🖥️ Screen share started in room ${roomId} by ${socket.username}`);
+
+    // Notify all users in the room that screen share has started
+    io.to(roomId).emit('screen-share-started', { 
+      creatorId: socket.id,
+      creatorName: socket.username 
+    });
+  });
+
+  // ── Stop screen share ─────────────────────────────────────────────────────
+  socket.on('stop-screen-share', ({ roomId }) => {
+    roomId = roomId?.toUpperCase();
+    const room = rooms[roomId];
+    if (!room || room.videoType !== 'screen') return;
+    if (room.creatorId !== socket.id) return; // Only creator can stop
+
+    room.screenActive = false;
+    console.log(`⏹️ Screen share stopped in room ${roomId} by ${socket.username}`);
+
+    // Notify all users
+    io.to(roomId).emit('screen-share-stopped', {
+      creatorId: socket.id,
+      reason: 'creator-stopped'
+    });
+  });
+
+  // ── Screen share WebRTC signaling ──────────────────────────────────────────
+  socket.on('screen-offer', ({ to, offer }) => {
+    io.to(to).emit('screen-offer', { from: socket.id, offer });
+  });
+
+  socket.on('screen-answer', ({ to, answer }) => {
+    io.to(to).emit('screen-answer', { from: socket.id, answer });
+  });
+
+  socket.on('screen-ice-candidate', ({ to, candidate }) => {
+    io.to(to).emit('screen-ice-candidate', { from: socket.id, candidate });
+  });
+
+  // ── Request screen stream (viewer asks creator for stream) ─────────────────
+  socket.on('request-screen-stream', ({ roomId }) => {
+    roomId = roomId?.toUpperCase();
+    const room = rooms[roomId];
+    if (!room || room.videoType !== 'screen' || !room.creatorId) return;
+    if (!room.screenActive) return;
+
+    // Tell the creator to send an offer to this viewer
+    io.to(room.creatorId).emit('send-screen-to-viewer', { viewerId: socket.id });
+  });
+
+  // ── WebRTC signaling (voice chat) ──────────────────────────────────────────
   socket.on('webrtc-offer',         ({ to, offer })      => io.to(to).emit('webrtc-offer',         { from: socket.id, offer }));
   socket.on('webrtc-answer',        ({ to, answer })     => io.to(to).emit('webrtc-answer',        { from: socket.id, answer }));
   socket.on('webrtc-ice-candidate', ({ to, candidate })  => io.to(to).emit('webrtc-ice-candidate', { from: socket.id, candidate }));
@@ -515,6 +602,18 @@ io.on('connection', (socket) => {
     if (!roomId || !rooms[roomId]) return;
 
     const room = rooms[roomId];
+
+    // If the leaving user was the screen share creator, stop the share
+    if (room.videoType === 'screen' && room.creatorId === socket.id) {
+      room.screenActive = false;
+      room.creatorId = null;
+      io.to(roomId).emit('screen-share-stopped', {
+        creatorId: socket.id,
+        reason: 'creator-left'
+      });
+      console.log(`⏹️ Screen share auto-stopped (creator ${socket.username} left room ${roomId})`);
+    }
+
     room.users = room.users.filter(u => u.id !== socket.id);
 
     io.to(roomId).emit('user-left', {
@@ -543,6 +642,7 @@ server.listen(PORT, () => {
   console.log(`\n🎬 MovieTime Watch Party running on http://localhost:${PORT}`);
   console.log(`📁 Uploads directory: ${UPLOADS_DIR}`);
   console.log(`🔒 Video streaming: /video/:token (secured)`);
+  console.log(`🖥️ Screen share: WebRTC peer-to-peer`);
   console.log(`⏱  Auto-delete timeout: ${AUTO_DELETE_TIMEOUT_MS / 60000} minutes`);
   console.log();
 });

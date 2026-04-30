@@ -45,6 +45,76 @@
         <div class="video-wrap" id="videoWrap">
           <div class="sync-toast" id="syncToast"></div>
           <div class="emoji-float-container" id="emojiFloatContainer"></div>
+
+          <!-- Video overlay controls (quality, fullscreen, badge) -->
+          <div class="video-overlay-controls" id="videoOverlayControls">
+            <div class="quality-badge-wrap">
+              <span class="quality-badge hd" id="qualityBadge">HD</span>
+            </div>
+            <div class="overlay-btns">
+              <!-- Quality selector -->
+              <div class="quality-btn-wrap">
+                <button class="overlay-icon-btn" id="qualityBtn" title="Video Quality">⚙️</button>
+                <div class="quality-panel" id="qualityPanel">
+                  <div class="quality-panel-title">Video Quality</div>
+                  <div class="quality-option active" data-quality="auto">
+                    <span class="qo-label">Auto</span>
+                    <span class="qo-badge hd">HD</span>
+                  </div>
+                  <div class="quality-option" data-quality="high">
+                    <span class="qo-label">1080p</span>
+                    <span class="qo-badge hd">HD</span>
+                  </div>
+                  <div class="quality-option" data-quality="medium">
+                    <span class="qo-label">720p</span>
+                    <span class="qo-badge hd">HD</span>
+                  </div>
+                  <div class="quality-option" data-quality="low">
+                    <span class="qo-label">360p</span>
+                    <span class="qo-badge sd">SD</span>
+                  </div>
+                </div>
+              </div>
+              <!-- Fullscreen button -->
+              <button class="overlay-icon-btn" id="fullscreenBtn" title="Fullscreen">⛶</button>
+            </div>
+          </div>
+
+          <!-- Screen share waiting message (hidden by default) -->
+          <div class="screen-waiting" id="screenWaiting" style="display:none">
+            <div class="sw-content">
+              <div class="sw-icon">🎬</div>
+              <div class="sw-pulse-ring"></div>
+              <h3>Waiting for friend to play video...</h3>
+              <p>The room creator will select and play a video soon</p>
+            </div>
+          </div>
+        </div>
+        <!-- Screen share controls (creator only, hidden by default) -->
+        <div class="screen-share-controls" id="screenShareControls" style="display:none">
+          <div class="ss-file-row">
+            <label class="btn-file-select" id="fileSelectLabel">
+              <input type="file" id="screenFileInput" accept="video/*" hidden>
+              <span class="ss-btn-icon">📁</span>
+              <span class="ss-btn-text">Select Video File</span>
+            </label>
+            <span class="ss-file-name" id="ssFileName">No file selected</span>
+          </div>
+          <div class="ss-action-row">
+            <button class="btn-screen-share" id="startScreenShareBtn" disabled>
+              <span class="ss-btn-icon">▶️</span>
+              <span class="ss-btn-text">Start Streaming</span>
+            </button>
+            <button class="btn-stop-share" id="stopScreenShareBtn" style="display:none">
+              <span class="ss-btn-icon">⏹️</span>
+              <span class="ss-btn-text">Stop Streaming</span>
+            </button>
+            <div class="ss-status" id="ssStatus"></div>
+          </div>
+        </div>
+        <!-- Creator local video preview (hidden by default) -->
+        <div class="ss-local-preview-wrap" id="ssLocalPreviewWrap" style="display:none">
+          <video id="ssLocalVideo" controls playsinline></video>
         </div>
         <div class="room-info-strip">
           <div class="room-name" id="roomNameEl">Watch Party</div>
