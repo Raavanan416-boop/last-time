@@ -17,6 +17,7 @@ const socket = io();
 /* â”€â”€ DOM refs â”€â”€ */
 const videoWrap      = document.getElementById('videoWrap');
 const syncToast      = document.getElementById('syncToast');
+const chatToast      = document.getElementById('chatToast');
 const roomIdDisplay  = document.getElementById('roomIdDisplay');
 const roomNameEl     = document.getElementById('roomNameEl');
 const usernameEl     = document.getElementById('usernameEl');
@@ -64,12 +65,17 @@ const mutedUsers = {};
 const speakingState = {};
 let localAnalyser = null;
 let localSpeaking = false;
+let chatToastTimer = null;
+let screenStreamSent = false; // Guard: prevent sending stream tracks multiple times
+let chatToastQueue = []; // Queue for chat toast messages
+let chatToastShowing = false;
 
-/* ── Quality / Bitrate settings ── */
+/* ── Quality / Bitrate settings (reduced for stability) ── */
+const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
 const QUALITY_PRESETS = {
-  auto:   { maxBitrate: 5000000, scaleDown: 1.0, label: 'Auto',   badge: 'HD' },
-  high:   { maxBitrate: 5000000, scaleDown: 1.0, label: '1080p',  badge: 'HD' },
-  medium: { maxBitrate: 2500000, scaleDown: 1.5, label: '720p',   badge: 'HD' },
+  auto:   { maxBitrate: isMobile ? 1500000 : 2500000, scaleDown: isMobile ? 2.0 : 1.0, label: 'Auto',   badge: isMobile ? 'SD' : 'HD' },
+  high:   { maxBitrate: 2500000, scaleDown: 1.0, label: '1080p',  badge: 'HD' },
+  medium: { maxBitrate: 1500000, scaleDown: 1.5, label: '720p',   badge: 'HD' },
   sd:     { maxBitrate: 1200000, scaleDown: 2.0, label: '480p',   badge: 'SD' },
   low:    { maxBitrate: 500000,  scaleDown: 3.0, label: '360p',   badge: 'SD' },
   smooth: { maxBitrate: 1500000, scaleDown: 2.0, label: 'Smooth', badge: 'SD' }
@@ -371,10 +377,26 @@ function addChatMsg(data) {
     ts.className = 'msg-time';
     ts.textContent = formatTime(data.timestamp || Date.now());
     div.appendChild(ts);
-    if (!isMine) incrementBadge();
+    if (!isMine) {
+      incrementBadge();
+      // Show toast notification on top of video
+      showTopToast({ user: data.username, message: data.message });
+    }
   }
   chatMessages.appendChild(div);
   chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+/* -- Top Toast Notification (chat messages on top of video) -- */
+function showTopToast(data) {
+  const toast = document.getElementById('chatToast');
+  if (!toast) return;
+  toast.textContent = data.user + ': ' + data.message;
+  toast.classList.add('show');
+  clearTimeout(chatToastTimer);
+  chatToastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 3000);
 }
 
 function sendChat() {
@@ -543,29 +565,54 @@ document.getElementById('confirmLeaveBtn').addEventListener('click', () => {
 leavePopup.addEventListener('click', e => { if (e.target === leavePopup) leavePopup.classList.remove('show'); });
 
 /* â•â•â•â•â•â•â•â•â•â• WEBRTC VOICE CHAT â•â•â•â•â•â•â•â•â•â• */
-const ICE_SERVERS = { iceServers: [
+/* ── Dynamic ICE config (fetched from server for reliable TURN) ── */
+let ICE_CONFIG = { iceServers: [
   { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  }
+  { urls: 'stun:stun1.l.google.com:19302' }
 ]};
+
+(async function fetchIceServers() {
+  try {
+    const res = await fetch('/api/ice-servers');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.iceServers && data.iceServers.length > 0) {
+        ICE_CONFIG = { iceServers: data.iceServers };
+        console.log('[ICE] Loaded ' + data.iceServers.length + ' servers (STUN+TURN)');
+      }
+    }
+  } catch (err) {
+    console.warn('[ICE] Fetch failed, STUN only:', err.message);
+  }
+})();
+
+/* ── ICE Candidate Buffer (fix race condition) ── */
+const iceCandidateBuffer = {};
+function bufferIceCandidate(id, c) {
+  if (!iceCandidateBuffer[id]) iceCandidateBuffer[id] = [];
+  iceCandidateBuffer[id].push(c);
+}
+async function flushIceCandidates(id, pc) {
+  const buf = iceCandidateBuffer[id];
+  if (!buf || !buf.length) return;
+  for (const c of buf) {
+    try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
+  }
+  delete iceCandidateBuffer[id];
+}
 
 async function initVoice(users) {
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    // Fix: Keep only first audio track to prevent audio stutter
+    const audioTracks = localStream.getAudioTracks();
+    if (audioTracks.length > 1) {
+      for (let i = 1; i < audioTracks.length; i++) {
+        localStream.removeTrack(audioTracks[i]);
+        audioTracks[i].stop();
+      }
+      console.log('[Audio] Trimmed to single audio track');
+    }
     setupLocalSpeakingDetection(localStream);
     users.forEach(u => {
       if (u.id !== socket.id) createPeerConnection(u.id, true);
@@ -580,7 +627,7 @@ async function initVoice(users) {
 
 function createPeerConnection(peerId, isInitiator) {
   if (peerConnections[peerId]) return;
-  const pc = new RTCPeerConnection(ICE_SERVERS);
+  const pc = new RTCPeerConnection(ICE_CONFIG);
   peerConnections[peerId] = pc;
   if (localStream) {
     // Guard against duplicate track adding
@@ -712,23 +759,6 @@ speakerBtn.addEventListener('click', () => {
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SCREEN SHARE SYSTEM (File-based captureStream)
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-const SCREEN_ICE = { iceServers: [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  }
-]};
-
 const screenFileInput = document.getElementById('screenFileInput');
 const ssFileName = document.getElementById('ssFileName');
 const ssLocalPreviewWrap = document.getElementById('ssLocalPreviewWrap');
@@ -802,16 +832,11 @@ async function startScreenShare() {
       ssStatus.textContent = 'âŒ Your browser does not support captureStream';
       return;
     }
-    // Force HD: temporarily set video element dimensions for max resolution capture
-    const origWidth = ssLocalVideo.style.width;
-    const origHeight = ssLocalVideo.style.height;
-    ssLocalVideo.style.width = '1920px';
-    ssLocalVideo.style.height = '1080px';
-    screenStream = ssLocalVideo.captureStream ? ssLocalVideo.captureStream(30) : ssLocalVideo.mozCaptureStream();
-    // Restore original styling
-    ssLocalVideo.style.width = origWidth;
-    ssLocalVideo.style.height = origHeight;
-    console.log(`[HD] Captured stream at ${ssLocalVideo.videoWidth}x${ssLocalVideo.videoHeight} @30fps`);
+    // Capture at reduced fps for smooth, stable streaming
+    const captureFrameRate = isMobile ? 15 : 24;
+    screenStream = ssLocalVideo.captureStream ? ssLocalVideo.captureStream(captureFrameRate) : ssLocalVideo.mozCaptureStream();
+    console.log(`[Stream] Captured at ${ssLocalVideo.videoWidth}x${ssLocalVideo.videoHeight} @${captureFrameRate}fps`);
+    screenStreamSent = false; // Reset guard for new stream
 
     // Wait for tracks to be available
     try {
@@ -878,15 +903,19 @@ function createScreenPeerForViewer(viewerId) {
     delete screenPeerConnections[viewerId];
   }
 
-  const pc = new RTCPeerConnection(SCREEN_ICE);
+  const pc = new RTCPeerConnection(ICE_CONFIG);
   screenPeerConnections[viewerId] = pc;
 
-  // Add all tracks from the captured stream
+  // ✅ Add tracks ONCE per peer — prevent duplicate track sending
   if (screenStream) {
+    const existingSenders = pc.getSenders();
     const tracks = screenStream.getTracks();
-    console.log(`Adding ${tracks.length} tracks to peer for ${viewerId}`);
+    console.log(`[Screen] Adding ${tracks.length} tracks to peer for ${viewerId}`);
     tracks.forEach(track => {
-      pc.addTrack(track, screenStream);
+      const alreadyAdded = existingSenders.some(s => s.track && s.track.id === track.id);
+      if (!alreadyAdded) {
+        pc.addTrack(track, screenStream);
+      }
     });
   }
 
@@ -897,17 +926,17 @@ function createScreenPeerForViewer(viewerId) {
   };
 
   pc.oniceconnectionstatechange = () => {
-    console.log(`ICE state for ${viewerId}: ${pc.iceConnectionState}`);
+    console.log(`[Screen] ICE: ${pc.iceConnectionState} (peer: ${viewerId})`);
     if (pc.iceConnectionState === 'failed') {
-      console.log('ICE failed, restarting...');
+      console.log('[Screen] ICE failed, restarting...');
       pc.restartIce();
     }
   };
 
   pc.onconnectionstatechange = () => {
-    console.log(`Connection state for ${viewerId}: ${pc.connectionState}`);
+    console.log(`[Screen] Connection: ${pc.connectionState} (peer: ${viewerId})`);
     if (pc.connectionState === 'connected') {
-      // Apply HD bitrate once connection is fully established
+      // Apply stable bitrate once connection is fully established
       applyBitrate(pc);
     }
     if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
@@ -924,22 +953,22 @@ function createScreenPeerForViewer(viewerId) {
     return pc.setLocalDescription(offer);
   }).then(() => {
     socket.emit('screen-offer', { to: viewerId, offer: pc.localDescription });
-    console.log(`Sent screen offer to ${viewerId}`);
-    // Also apply bitrate early as a fallback
+    console.log(`[Screen] Sent offer to ${viewerId}`);
+    // Apply bitrate early as a fallback
     setTimeout(() => applyBitrate(pc), 1000);
   }).catch(err => {
-    console.error('Failed to create offer:', err);
+    console.error('[Screen] Failed to create offer:', err);
   });
 }
 
-// â”€â”€ Creator: server asks to send stream to a new viewer â”€â”€
+// ── Creator: server asks to send stream to a new viewer ──
 socket.on('send-screen-to-viewer', ({ viewerId }) => {
   if (!isScreenCreator || !screenStream) return;
   console.log('Server requested stream for viewer:', viewerId);
   createScreenPeerForViewer(viewerId);
 });
 
-// â”€â”€ Viewer: receive screen offer from creator â”€â”€
+// ── Viewer: receive screen offer from creator ──
 socket.on('screen-offer', async ({ from, offer }) => {
   if (isScreenCreator) return;
   console.log('Received screen offer from creator:', from);
@@ -950,7 +979,7 @@ socket.on('screen-offer', async ({ from, offer }) => {
     delete screenPeerConnections[from];
   }
 
-  const pc = new RTCPeerConnection(SCREEN_ICE);
+  const pc = new RTCPeerConnection(ICE_CONFIG);
   screenPeerConnections[from] = pc;
 
   pc.ontrack = (event) => {
@@ -1038,6 +1067,7 @@ socket.on('screen-answer', async ({ from, answer }) => {
   if (!pc) return;
   try {
     await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    await flushIceCandidates(from, pc);
     console.log('Set remote description from viewer:', from);
   } catch (err) {
     console.error('Failed to set answer:', err);
@@ -1047,7 +1077,10 @@ socket.on('screen-answer', async ({ from, answer }) => {
 // â”€â”€ ICE candidates for screen share â”€â”€
 socket.on('screen-ice-candidate', async ({ from, candidate }) => {
   const pc = screenPeerConnections[from];
-  if (!pc) return;
+  if (!pc || !pc.remoteDescription || !pc.remoteDescription.type) {
+    bufferIceCandidate(from, candidate);
+    return;
+  }
   try {
     await pc.addIceCandidate(new RTCIceCandidate(candidate));
   } catch (err) {
@@ -1088,7 +1121,7 @@ socket.on('user-joined', ({ username: uname, users }) => {
   }
 });
 
-/* ═══════════ BITRATE CONTROL ═══════════ */
+/* ═══════════ BITRATE CONTROL (Optimized for stability) ═══════════ */
 async function applyBitrate(pc) {
   try {
     const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
@@ -1102,21 +1135,19 @@ async function applyBitrate(pc) {
     const effectiveQuality = performanceMode ? 'smooth' : currentQuality;
     const preset = QUALITY_PRESETS[effectiveQuality] || QUALITY_PRESETS.auto;
 
-    params.encodings[0].maxBitrate = preset.maxBitrate;
+    // Cap bitrate for smooth streaming (prevents stutter)
+    const maxAllowedBitrate = isMobile ? 1000000 : 1500000;
+    params.encodings[0].maxBitrate = Math.min(preset.maxBitrate, maxAllowedBitrate);
     params.encodings[0].scaleResolutionDownBy = preset.scaleDown || 1.0;
-
-    // Prevent browser from degrading quality
-    if (preset.scaleDown <= 1.0) {
-      params.degradationPreference = 'maintain-resolution';
-    } else {
-      params.degradationPreference = 'maintain-framerate';
-    }
+    // Limit max framerate for stability
+    params.encodings[0].maxFramerate = isMobile ? 15 : 24;
+    // Prioritize framerate to avoid stutter/buffering
+    params.degradationPreference = 'maintain-framerate';
 
     await sender.setParameters(params);
 
     // Debug logs
-    console.log(`[Quality] Bitrate: ${(preset.maxBitrate / 1000000).toFixed(1)} Mbps | Scale: ${preset.scaleDown}x | Mode: ${preset.label}`);
-    console.log(`[Quality] Tracks:`, pc.getSenders().map(s => s.track ? `${s.track.kind}:${s.track.readyState}` : 'null'));
+    console.log(`[Quality] Bitrate: ${(params.encodings[0].maxBitrate / 1000000).toFixed(1)} Mbps | Scale: ${preset.scaleDown}x | Mode: ${preset.label} | Mobile: ${isMobile}`);
   } catch (err) {
     console.warn('Failed to set bitrate:', err);
   }

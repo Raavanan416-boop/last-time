@@ -157,6 +157,20 @@ label{display:block;color:var(--text2);font-size:.82rem;font-weight:600;margin-b
 .sync-toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:var(--text);padding:6px 16px;border-radius:20px;font-size:.8rem;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .sync-toast.show{opacity:1}
 
+/* ── Chat toast notification (top of video) ── */
+.chat-toast{
+  position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:25;
+  background:rgba(0,0,0,.75);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  color:#fff;padding:8px 20px;border-radius:24px;
+  font-size:.82rem;font-weight:600;letter-spacing:.2px;
+  opacity:0;transition:opacity .35s ease,transform .35s ease;
+  pointer-events:none;white-space:nowrap;max-width:80%;overflow:hidden;text-overflow:ellipsis;
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 4px 20px rgba(0,0,0,.5);
+  transform:translateX(-50%) translateY(-8px);
+}
+.chat-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
 /* ── Emoji button & panel ── */
 .emoji-btn-wrap{position:relative}
 .emoji-panel{
