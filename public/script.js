@@ -1,12 +1,12 @@
 /**
- * MovieTime Watch Party â€” Client Script (player.html)
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * Socket.io sync Â· WebRTC voice Â· YouTube Iframe API
- * Floating chat panel Â· Speaking detection Â· Unread badge
- * Secure video streaming via token Â· Auto-delete on video end
+ * MovieTime Watch Party � Client Script (player.html)
+ * ────────────────────────────────────────────────────
+ * Socket.io sync � WebRTC voice � YouTube Iframe API
+ * Floating chat panel � Speaking detection � Unread badge
+ * Secure video streaming via token � Auto-delete on video end
  */
 
-/* â•â•â•â•â•â•â•â•â•â• INIT â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ INIT ══════════ */
 const params = new URLSearchParams(location.search);
 const ROOM_ID = params.get('room');
 const USERNAME = localStorage.getItem('mt_username');
@@ -14,7 +14,7 @@ if (!ROOM_ID || !USERNAME) { location.href = 'index.html'; }
 
 const socket = io();
 
-/* â”€â”€ DOM refs â”€â”€ */
+/* ── DOM refs ── */
 const videoWrap      = document.getElementById('videoWrap');
 const syncToast      = document.getElementById('syncToast');
 const chatToast      = document.getElementById('chatToast');
@@ -46,7 +46,7 @@ const panelTrack    = document.getElementById('panelTrack');
 const panelViewport = document.getElementById('panelViewport');
 const voiceUserList = document.getElementById('voiceUserList');
 
-/* â”€â”€ State â”€â”€ */
+/* ── State ── */
 let videoEl = null;
 let ytPlayer = null;
 let videoType = null;
@@ -83,7 +83,7 @@ const QUALITY_PRESETS = {
 let currentQuality = 'auto';
 let performanceMode = false; // false = High Quality, true = Smooth Mode
 
-/* â”€â”€ Screen Share State â”€â”€ */
+/* ── Screen Share State ── */
 let isScreenCreator = false;
 let screenStream = null;
 const screenPeerConnections = {};
@@ -101,22 +101,22 @@ function startSyncing() {
   syncTimer = setTimeout(() => { isSyncing = false; }, 500);
 }
 
-/* â•â•â•â•â•â•â•â•â•â• DISPLAY SETUP â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ DISPLAY SETUP ══════════ */
 roomIdDisplay.textContent = ROOM_ID;
 usernameEl.textContent = USERNAME;
 
-/* â•â•â•â•â•â•â•â•â•â• COPY ROOM ID â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ COPY ROOM ID ══════════ */
 copyBtn.addEventListener('click', () => {
   navigator.clipboard.writeText(ROOM_ID).then(() => {
-    copyBtn.textContent = 'âœ…';
+    copyBtn.textContent = '✅';
     copyBtn.classList.add('copied');
-    setTimeout(() => { copyBtn.textContent = 'ðŸ“‹'; copyBtn.classList.remove('copied'); }, 1500);
+    setTimeout(() => { copyBtn.textContent = '\uD83D\uDCCB'; copyBtn.classList.remove('copied'); }, 1500);
   });
 });
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-   CHAT PANEL â€” OPEN / CLOSE / BADGE
-   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ══════════════════════════════════════
+   CHAT PANEL � OPEN / CLOSE / BADGE
+   ══════════════════════════════════════ */
 function openPanel() {
   panelOpen = true;
   chatPanel.classList.add('open');
@@ -144,7 +144,7 @@ function incrementBadge() {
   chatBadge.classList.add('visible');
 }
 
-/* â”€â”€ Panel tabs (Chat / Voice) â”€â”€ */
+/* ── Panel tabs (Chat / Voice) ── */
 let panelTabActive = 0;
 const panelTabBtns = panelNav.querySelectorAll('.tab-btn');
 
@@ -172,7 +172,7 @@ panelViewport.addEventListener('touchend', e => {
   }
 }, { passive: true });
 
-/* â”€â”€ Swipe to close panel (swipe right) â”€â”€ */
+/* ── Swipe to close panel (swipe right) ── */
 let panelSx = 0;
 chatPanel.addEventListener('touchstart', e => { panelSx = e.touches[0].clientX; }, { passive: true });
 chatPanel.addEventListener('touchend', e => {
@@ -180,7 +180,7 @@ chatPanel.addEventListener('touchend', e => {
   if (dx > 80) closePanel();
 }, { passive: true });
 
-/* â•â•â•â•â•â•â•â•â•â• JOIN ROOM â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ JOIN ROOM ══════════ */
 {
   const creatorFlag = localStorage.getItem('mt_screen_creator_' + ROOM_ID) === 'true';
   socket.emit('join-room', { roomId: ROOM_ID, username: USERNAME, isScreenCreator: creatorFlag });
@@ -229,11 +229,11 @@ socket.on('error-msg', (msg) => {
 
 // Handle server-side video deletion notification
 socket.on('video-deleted', ({ reason }) => {
-  // Silently handle â€” no message to user
+  // Silently handle � no message to user
   console.log('Video auto deleted:', reason);
 });
 
-/* â•â•â•â•â•â•â•â•â•â• FILE VIDEO (Streamed via /video/:token) â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ FILE VIDEO (Streamed via /video/:token) ══════════ */
 function setupFileVideo(token) {
   const v = document.createElement('video');
   v.src = `/video/${token}`; // Secure streaming route
@@ -269,7 +269,7 @@ function setupFileVideo(token) {
   });
 }
 
-/* â•â•â•â•â•â•â•â•â•â• YOUTUBE PLAYER (FIXED) â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ YOUTUBE PLAYER (FIXED) ══════════ */
 let ytReady = false;
 let ytPendingId = null;
 
@@ -309,7 +309,7 @@ function onYTState(e) {
   }
 }
 
-/* â•â•â•â•â•â•â•â•â•â• SYNC INCOMING â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ SYNC INCOMING ══════════ */
 function showSyncToast(msg) {
   syncToast.textContent = msg;
   syncToast.classList.add('show');
@@ -350,7 +350,7 @@ socket.on('video-seek', ({ currentTime, from }) => {
   }
 });
 
-/* â•â•â•â•â•â•â•â•â•â• CHAT â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ CHAT ══════════ */
 function formatTime(ts) {
   const d = new Date(ts);
   return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
@@ -409,7 +409,7 @@ chatSendBtn.addEventListener('click', sendChat);
 chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
 socket.on('chat-message', addChatMsg);
 
-/* â•â•â•â•â•â•â•â•â•â• EMOJI REACTIONS â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ EMOJI REACTIONS ══════════ */
 const emojiBtn = document.getElementById('emojiBtn');
 const emojiPanel = document.getElementById('emojiPanel');
 const emojiFloatContainer = document.getElementById('emojiFloatContainer');
@@ -468,11 +468,11 @@ function showFloatingEmoji(username, emoji) {
   setTimeout(() => group.remove(), 2600);
 }
 
-/* â•â•â•â•â•â•â•â•â•â• USER EVENTS â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ USER EVENTS ══════════ */
 socket.on('user-joined', ({ username: uname, users, userCount }) => {
   userCountEl.textContent = userCount;
   currentUsers = users;
-  addChatMsg({ system: true, message: `${uname} joined the party ðŸŽ‰` });
+  addChatMsg({ system: true, message: `${uname} joined the party \uD83C\uDF89` });
   renderUserList(users);
   renderVoiceUserList();
   if (localStream && uname !== USERNAME) {
@@ -489,7 +489,7 @@ socket.on('user-left', ({ username: uname, users, userCount }) => {
   renderVoiceUserList();
 });
 
-/* â•â•â•â•â•â•â•â•â•â• USER LIST POPUP â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ USER LIST POPUP ══════════ */
 usersBtn.addEventListener('click', () => usersPopup.classList.add('show'));
 document.getElementById('closeUsersPopup').addEventListener('click', () => usersPopup.classList.remove('show'));
 usersPopup.addEventListener('click', e => { if (e.target === usersPopup) usersPopup.classList.remove('show'); });
@@ -504,7 +504,7 @@ function renderUserList(users) {
   });
 }
 
-/* â•â•â•â•â•â•â•â•â•â• VOICE TAB RENDERING â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ VOICE TAB RENDERING ══════════ */
 function renderVoiceUserList() {
   voiceUserList.innerHTML = '';
   currentUsers.forEach(u => {
@@ -531,10 +531,10 @@ function renderVoiceUserList() {
     muteBtn.title = isMuted ? 'Unmute' : 'Mute';
 
     if (isMe) {
-      muteBtn.textContent = micOn ? 'ðŸŽ¤' : 'ðŸ”‡';
+      muteBtn.textContent = micOn ? '\uD83C\uDFA4' : '\uD83D\uDD07';
       muteBtn.addEventListener('click', () => toggleMic());
     } else {
-      muteBtn.textContent = isMuted ? 'ðŸ”‡' : 'ðŸ”Š';
+      muteBtn.textContent = isMuted ? '\uD83D\uDD07' : '\uD83D\uDD0A';
       muteBtn.addEventListener('click', () => {
         mutedUsers[u.id] = !mutedUsers[u.id];
         if (remoteAudios[u.id]) remoteAudios[u.id].muted = !!mutedUsers[u.id];
@@ -546,7 +546,7 @@ function renderVoiceUserList() {
   });
 }
 
-/* â•â•â•â•â•â•â•â•â•â• LEAVE â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ LEAVE ══════════ */
 leaveBtn.addEventListener('click', () => leavePopup.classList.add('show'));
 document.getElementById('continueBtn').addEventListener('click', () => leavePopup.classList.remove('show'));
 document.getElementById('confirmLeaveBtn').addEventListener('click', () => {
@@ -564,7 +564,7 @@ document.getElementById('confirmLeaveBtn').addEventListener('click', () => {
 });
 leavePopup.addEventListener('click', e => { if (e.target === leavePopup) leavePopup.classList.remove('show'); });
 
-/* â•â•â•â•â•â•â•â•â•â• WEBRTC VOICE CHAT â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ WEBRTC VOICE CHAT ══════════ */
 /* ── Dynamic ICE config (fetched from server for reliable TURN) ── */
 let ICE_CONFIG = { iceServers: [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -619,7 +619,7 @@ async function initVoice(users) {
     });
   } catch (err) {
     console.warn('Microphone not available:', err);
-    micBtn.querySelector('.vc-icon').textContent = 'ðŸš«';
+    micBtn.querySelector('.vc-icon').textContent = '\uD83D\uDEAB';
     micBtn.querySelector('.vc-label').textContent = 'No Mic';
     micBtn.style.opacity = '0.4';
   }
@@ -690,7 +690,7 @@ socket.on('webrtc-ice-candidate', async ({ from, candidate }) => {
   const pc = peerConnections[from]; if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
 });
 
-/* â•â•â•â•â•â•â•â•â•â• SPEAKING DETECTION â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ SPEAKING DETECTION ══════════ */
 function setupLocalSpeakingDetection(stream) {
   try {
     const ctx = new AudioContext(); const source = ctx.createMediaStreamSource(stream);
@@ -731,23 +731,23 @@ function updateSpeakingUI(peerId, isSpeaking) {
   if (item) item.classList.toggle('speaking', isSpeaking);
 }
 
-/* â•â•â•â•â•â•â•â•â•â• MIC TOGGLE â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ MIC TOGGLE ══════════ */
 function toggleMic() {
   if (!localStream) return;
   micOn = !micOn;
   localStream.getAudioTracks().forEach(t => t.enabled = micOn);
-  micBtn.querySelector('.vc-icon').textContent = micOn ? 'ðŸŽ¤' : 'ðŸ”‡';
+  micBtn.querySelector('.vc-icon').textContent = micOn ? '\uD83C\uDFA4' : '\uD83D\uDD07';
   micBtn.querySelector('.vc-label').textContent = micOn ? 'Mic On' : 'Mic Off';
   micBtn.classList.toggle('muted', !micOn);
   renderVoiceUserList();
 }
 micBtn.addEventListener('click', toggleMic);
 
-/* â•â•â•â•â•â•â•â•â•â• SPEAKER TOGGLE (ALL) â•â•â•â•â•â•â•â•â•â• */
+/* ══════════ SPEAKER TOGGLE (ALL) ══════════ */
 speakerBtn.addEventListener('click', () => {
   speakerOn = !speakerOn;
   Object.values(remoteAudios).forEach(a => a.muted = !speakerOn);
-  speakerBtn.querySelector('.vc-icon').textContent = speakerOn ? 'ðŸ”Š' : 'ðŸ”ˆ';
+  speakerBtn.querySelector('.vc-icon').textContent = speakerOn ? '\uD83D\uDD0A' : '\uD83D\uDD08';
   speakerBtn.querySelector('.vc-label').textContent = speakerOn ? 'Speaker On' : 'Speaker Off';
   speakerBtn.classList.toggle('muted', !speakerOn);
   if (videoEl) videoEl.muted = speakerOn;
@@ -756,9 +756,9 @@ speakerBtn.addEventListener('click', () => {
   renderVoiceUserList();
 });
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ═══════════════════════════════════════════════════
    SCREEN SHARE SYSTEM (File-based captureStream)
-   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+   ═══════════════════════════════════════════════════ */
 const screenFileInput = document.getElementById('screenFileInput');
 const ssFileName = document.getElementById('ssFileName');
 const ssLocalPreviewWrap = document.getElementById('ssLocalPreviewWrap');
@@ -816,9 +816,9 @@ function waitForStreamTracks(stream, timeoutMs) {
 
 async function startScreenShare() {
   try {
-    if (!ssLocalVideo.src) { ssStatus.textContent = 'âŒ Select a video first'; return; }
+    if (!ssLocalVideo.src) { ssStatus.textContent = '❌ Select a video first'; return; }
 
-    ssStatus.textContent = 'â³ Starting video...';
+    ssStatus.textContent = '⏳ Starting video...';
 
     // Ensure video is playing first
     ssLocalVideo.muted = false;
@@ -829,7 +829,7 @@ async function startScreenShare() {
 
     // Capture stream from the playing video element
     if (!ssLocalVideo.captureStream && !ssLocalVideo.mozCaptureStream) {
-      ssStatus.textContent = 'âŒ Your browser does not support captureStream';
+      ssStatus.textContent = '❌ Your browser does not support captureStream';
       return;
     }
     // Capture at reduced fps for smooth, stable streaming
@@ -846,10 +846,10 @@ async function startScreenShare() {
     }
 
     const tracks = screenStream.getTracks();
-    console.log(`âœ… captureStream ready â€” ${tracks.length} tracks:`, tracks.map(t => `${t.kind}:${t.readyState}`));
+    console.log('[Screen] captureStream ready - ' + tracks.length + ' tracks:', tracks.map(t => `${t.kind}:${t.readyState}`));
 
     if (tracks.length === 0) {
-      ssStatus.textContent = 'âŒ No tracks captured â€” try a different video file';
+      ssStatus.textContent = '\u274C No tracks captured - try a different video file';
       return;
     }
 
@@ -860,7 +860,7 @@ async function startScreenShare() {
     startScreenShareBtn.style.display = 'none';
     stopScreenShareBtn.style.display = 'inline-flex';
     screenFileInput.disabled = true;
-    ssStatus.textContent = 'ðŸ”´ Live â€” Streaming video to room';
+    ssStatus.textContent = '\uD83D\uDD34 Live \u2014 Streaming video to room';
     ssStatus.classList.add('live');
     screenActive = true;
 
@@ -873,7 +873,7 @@ async function startScreenShare() {
     });
   } catch (err) {
     console.error('Stream start failed:', err);
-    ssStatus.textContent = 'âŒ Failed to start â€” ' + (err.message || 'try again');
+    ssStatus.textContent = '\u274C Failed to start - ' + (err.message || 'try again');
     setTimeout(() => { ssStatus.textContent = ''; }, 4000);
   }
 }
@@ -885,7 +885,7 @@ function stopScreenShare() {
   Object.values(screenPeerConnections).forEach(pc => { try { pc.close(); } catch {} });
   Object.keys(screenPeerConnections).forEach(k => delete screenPeerConnections[k]);
 
-  screenStream = null; // Don't stop tracks â€” they belong to captureStream/video element
+  screenStream = null; // Don't stop tracks � they belong to captureStream/video element
 
   startScreenShareBtn.style.display = 'inline-flex';
   stopScreenShareBtn.style.display = 'none';
@@ -906,7 +906,7 @@ function createScreenPeerForViewer(viewerId) {
   const pc = new RTCPeerConnection(ICE_CONFIG);
   screenPeerConnections[viewerId] = pc;
 
-  // ✅ Add tracks ONCE per peer — prevent duplicate track sending
+  // ✅ Add tracks ONCE per peer � prevent duplicate track sending
   if (screenStream) {
     const existingSenders = pc.getSenders();
     const tracks = screenStream.getTracks();
@@ -1000,10 +1000,10 @@ socket.on('screen-offer', async ({ from, offer }) => {
       updateQualityBadge();
     }
     v.srcObject = event.streams[0];
-    // Ensure audio plays â€” handle autoplay policy
+    // Ensure audio plays � handle autoplay policy
     v.muted = false;
     v.play().catch(() => {
-      // Autoplay blocked â€” try muted first, then unmute on user interaction
+      // Autoplay blocked � try muted first, then unmute on user interaction
       v.muted = true;
       v.play().catch(() => {});
       const unmute = () => { v.muted = false; document.removeEventListener('click', unmute); };
@@ -1038,7 +1038,7 @@ socket.on('screen-offer', async ({ from, offer }) => {
       }, 2000);
     }
     if (pc.connectionState === 'disconnected') {
-      // Wait a moment before cleanup — transient disconnects can recover
+      // Wait a moment before cleanup � transient disconnects can recover
       setTimeout(() => {
         if (pc.connectionState === 'disconnected') {
           try { pc.close(); } catch {}
@@ -1061,7 +1061,7 @@ socket.on('screen-offer', async ({ from, offer }) => {
   }
 });
 
-// â”€â”€ Creator: receive answer from viewer â”€â”€
+// ── Creator: receive answer from viewer ──
 socket.on('screen-answer', async ({ from, answer }) => {
   const pc = screenPeerConnections[from];
   if (!pc) return;
@@ -1074,7 +1074,7 @@ socket.on('screen-answer', async ({ from, answer }) => {
   }
 });
 
-// â”€â”€ ICE candidates for screen share â”€â”€
+// ── ICE candidates for screen share ──
 socket.on('screen-ice-candidate', async ({ from, candidate }) => {
   const pc = screenPeerConnections[from];
   if (!pc || !pc.remoteDescription || !pc.remoteDescription.type) {
@@ -1088,7 +1088,7 @@ socket.on('screen-ice-candidate', async ({ from, candidate }) => {
   }
 });
 
-// â”€â”€ Screen share started notification â”€â”€
+// ── Screen share started notification ──
 socket.on('screen-share-started', ({ creatorName }) => {
   if (!isScreenCreator) {
     if (screenWaiting) screenWaiting.style.display = 'none';
@@ -1097,7 +1097,7 @@ socket.on('screen-share-started', ({ creatorName }) => {
   showSyncToast(`${creatorName} started streaming video`);
 });
 
-// â”€â”€ Screen share stopped notification â”€â”€
+// ── Screen share stopped notification ──
 socket.on('screen-share-stopped', ({ reason }) => {
   if (!isScreenCreator) {
     const v = document.getElementById('screenVideo');
@@ -1106,10 +1106,10 @@ socket.on('screen-share-stopped', ({ reason }) => {
     Object.values(screenPeerConnections).forEach(pc => { try { pc.close(); } catch {} });
     Object.keys(screenPeerConnections).forEach(k => delete screenPeerConnections[k]);
   }
-  showSyncToast(reason === 'creator-left' ? 'Host left â€” stream ended' : 'Video stream stopped');
+  showSyncToast(reason === 'creator-left' ? 'Host left - stream ended' : 'Video stream stopped');
 });
 
-// â”€â”€ When new user joins a screen room, creator sends them the stream â”€â”€
+// ── When new user joins a screen room, creator sends them the stream ──
 socket.on('user-joined', ({ username: uname, users }) => {
   if (isScreenCreator && screenStream && screenActive) {
     const nu = users.find(u => u.username === uname && u.id !== socket.id);
