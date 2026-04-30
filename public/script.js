@@ -196,10 +196,25 @@ socket.on('room-info', (info) => {
     setupScreenShareRoom(info);
   }
 
+  // Show quality/fullscreen controls ONLY for screen share mode
+  updateOverlayControlsVisibility(info.videoType);
+
   renderUserList(info.users);
   renderVoiceUserList();
   initVoice(info.users);
 });
+
+/* ── Show/hide quality+fullscreen for screen share only ── */
+function updateOverlayControlsVisibility(type) {
+  const overlayControls = document.getElementById('videoOverlayControls');
+  if (!overlayControls) return;
+  if (type === 'screen') {
+    overlayControls.style.display = 'flex';
+  } else {
+    // Hide fullscreen + quality for upload/youtube (they have native controls)
+    overlayControls.style.display = 'none';
+  }
+}
 
 socket.on('error-msg', (msg) => {
   alert(msg);
@@ -398,6 +413,23 @@ socket.on('emoji-reaction', ({ username, emoji }) => {
 });
 
 function showFloatingEmoji(username, emoji) {
+  // Ensure emoji container is inside videoWrap and visible
+  let container = emojiFloatContainer;
+  if (!container || !container.parentElement) {
+    container = document.getElementById('emojiFloatContainer');
+  }
+  // Safety: if container is missing, recreate it inside videoWrap
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'emojiFloatContainer';
+    container.className = 'emoji-float-container';
+    videoWrap.appendChild(container);
+  }
+  // Ensure it's inside videoWrap (not displaced by prepend operations)
+  if (container.parentElement !== videoWrap) {
+    videoWrap.appendChild(container);
+  }
+
   const left = 20 + Math.random() * 60;
   const group = document.createElement('div');
   group.className = 'emoji-float-group';
@@ -410,7 +442,7 @@ function showFloatingEmoji(username, emoji) {
   lbl.className = 'ef-label';
   lbl.textContent = `${username} reacted`;
   group.appendChild(lbl);
-  emojiFloatContainer.appendChild(group);
+  container.appendChild(group);
   setTimeout(() => group.remove(), 2600);
 }
 
@@ -511,7 +543,25 @@ document.getElementById('confirmLeaveBtn').addEventListener('click', () => {
 leavePopup.addEventListener('click', e => { if (e.target === leavePopup) leavePopup.classList.remove('show'); });
 
 /* â•â•â•â•â•â•â•â•â•â• WEBRTC VOICE CHAT â•â•â•â•â•â•â•â•â•â• */
-const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const ICE_SERVERS = { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  }
+]};
 
 async function initVoice(users) {
   try {
@@ -533,7 +583,14 @@ function createPeerConnection(peerId, isInitiator) {
   const pc = new RTCPeerConnection(ICE_SERVERS);
   peerConnections[peerId] = pc;
   if (localStream) {
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    // Guard against duplicate track adding
+    const existingSenders = pc.getSenders();
+    localStream.getTracks().forEach(track => {
+      const alreadyAdded = existingSenders.some(s => s.track && s.track.id === track.id);
+      if (!alreadyAdded) {
+        pc.addTrack(track, localStream);
+      }
+    });
   }
   pc.ontrack = (event) => {
     let audio = remoteAudios[peerId];
@@ -543,9 +600,23 @@ function createPeerConnection(peerId, isInitiator) {
     setupRemoteSpeakingDetection(peerId, event.streams[0]);
   };
   pc.onicecandidate = (event) => {
-    if (event.candidate) socket.emit('webrtc-ice-candidate', { to: peerId, candidate: event.candidate });
+    if (event.candidate) {
+      console.log(`[Voice] ICE candidate for ${peerId}:`, event.candidate.type);
+      socket.emit('webrtc-ice-candidate', { to: peerId, candidate: event.candidate });
+    }
+  };
+  pc.oniceconnectionstatechange = () => {
+    console.log(`[Voice] ICE state for ${peerId}: ${pc.iceConnectionState}`);
+    if (pc.iceConnectionState === 'failed') {
+      console.log('[Voice] ICE failed, restarting...');
+      pc.restartIce();
+    }
   };
   pc.onconnectionstatechange = () => {
+    console.log(`[Voice] Connection state for ${peerId}: ${pc.connectionState}`);
+    if (pc.connectionState === 'connected') {
+      console.log(`[Voice] ✅ Connected to ${peerId}`);
+    }
     if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
       pc.close(); delete peerConnections[peerId];
       if (remoteAudios[peerId]) { remoteAudios[peerId].srcObject = null; delete remoteAudios[peerId]; }
@@ -731,7 +802,16 @@ async function startScreenShare() {
       ssStatus.textContent = 'âŒ Your browser does not support captureStream';
       return;
     }
+    // Force HD: temporarily set video element dimensions for max resolution capture
+    const origWidth = ssLocalVideo.style.width;
+    const origHeight = ssLocalVideo.style.height;
+    ssLocalVideo.style.width = '1920px';
+    ssLocalVideo.style.height = '1080px';
     screenStream = ssLocalVideo.captureStream ? ssLocalVideo.captureStream(30) : ssLocalVideo.mozCaptureStream();
+    // Restore original styling
+    ssLocalVideo.style.width = origWidth;
+    ssLocalVideo.style.height = origHeight;
+    console.log(`[HD] Captured stream at ${ssLocalVideo.videoWidth}x${ssLocalVideo.videoHeight} @30fps`);
 
     // Wait for tracks to be available
     try {
@@ -907,14 +987,37 @@ socket.on('screen-offer', async ({ from, offer }) => {
   };
 
   pc.oniceconnectionstatechange = () => {
-    console.log(`Viewer ICE state: ${pc.iceConnectionState}`);
+    console.log(`[Screen] Viewer ICE state: ${pc.iceConnectionState}`);
+    if (pc.iceConnectionState === 'failed') {
+      console.log('[Screen] Viewer ICE failed, attempting restart...');
+      pc.restartIce();
+    }
   };
 
   pc.onconnectionstatechange = () => {
-    console.log(`Viewer connection state: ${pc.connectionState}`);
-    if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+    console.log(`[Screen] Viewer connection state: ${pc.connectionState}`);
+    if (pc.connectionState === 'connected') {
+      console.log('[Screen] ✅ Viewer connected to creator stream');
+    }
+    if (pc.connectionState === 'failed') {
       try { pc.close(); } catch {}
       delete screenPeerConnections[from];
+      // Auto-retry: request stream again after brief delay
+      console.log('[Screen] Connection failed, retrying in 2s...');
+      setTimeout(() => {
+        socket.emit('request-screen-stream', { roomId: ROOM_ID });
+      }, 2000);
+    }
+    if (pc.connectionState === 'disconnected') {
+      // Wait a moment before cleanup — transient disconnects can recover
+      setTimeout(() => {
+        if (pc.connectionState === 'disconnected') {
+          try { pc.close(); } catch {}
+          delete screenPeerConnections[from];
+          // Try reconnect
+          socket.emit('request-screen-stream', { roomId: ROOM_ID });
+        }
+      }, 3000);
     }
   };
 
