@@ -10,6 +10,7 @@
  * ✅ No direct file path exposure — /video/:token route only
  * ✅ Download blocked: Content-Disposition inline + nodownload
  * ✅ Screen Share via WebRTC (peer-to-peer)
+ * ✅ Reliable TURN server provisioning via Metered.ca
  */
 
 require('dotenv').config();
@@ -71,6 +72,73 @@ const videoTokens = {}; // videoTokens[token] = roomId
 
 // Auto-delete timeout duration (30 minutes)
 const AUTO_DELETE_TIMEOUT_MS = 30 * 60 * 1000;
+
+// ── TURN server configuration ────────────────────────────────────────────────
+// Metered.ca free TURN API key (set METERED_API_KEY in .env for your own key)
+const METERED_API_KEY = process.env.METERED_API_KEY || '';
+let cachedIceServers = null;
+let iceServersCacheTime = 0;
+const ICE_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 hours
+
+async function getIceServers() {
+  const now = Date.now();
+  if (cachedIceServers && (now - iceServersCacheTime) < ICE_CACHE_TTL) {
+    return cachedIceServers;
+  }
+
+  // Reliable base STUN servers
+  const stun = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' }
+  ];
+
+  // Try Metered.ca free TURN servers
+  if (METERED_API_KEY) {
+    try {
+      const res = await fetch(`https://movietime.metered.live/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`);
+      if (res.ok) {
+        const turnServers = await res.json();
+        cachedIceServers = [...stun, ...turnServers];
+        iceServersCacheTime = now;
+        console.log(`✅ TURN credentials fetched (${turnServers.length} servers)`);
+        return cachedIceServers;
+      }
+    } catch (err) {
+      console.warn('⚠️ Failed to fetch Metered TURN credentials:', err.message);
+    }
+  }
+
+  // Fallback: use free public TURN servers
+  const fallbackTurn = [
+    {
+      urls: 'turn:relay1.expressturn.com:443',
+      username: 'efYFGLRQ0ZJBDQHIGL',
+      credential: 'TqRVhPnb7F2k6Ij1'
+    },
+    {
+      urls: 'turn:standard.relay.metered.ca:80',
+      username: 'e437c0a0d3a5f33761ceada0',
+      credential: 'NWlq16SIhGS0E/lh'
+    },
+    {
+      urls: 'turn:standard.relay.metered.ca:443',
+      username: 'e437c0a0d3a5f33761ceada0',
+      credential: 'NWlq16SIhGS0E/lh'
+    },
+    {
+      urls: 'turn:standard.relay.metered.ca:443?transport=tcp',
+      username: 'e437c0a0d3a5f33761ceada0',
+      credential: 'NWlq16SIhGS0E/lh'
+    }
+  ];
+
+  cachedIceServers = [...stun, ...fallbackTurn];
+  iceServersCacheTime = now;
+  return cachedIceServers;
+}
 
 // ── Helper: generate secure token ───────────────────────────────────────────
 function generateToken() {
@@ -199,6 +267,21 @@ setInterval(() => {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  API ROUTES
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ── ICE Server Configuration Endpoint ────────────────────────────────────────
+app.get('/api/ice-servers', async (req, res) => {
+  try {
+    const iceServers = await getIceServers();
+    res.json({ iceServers });
+  } catch (err) {
+    console.error('ICE servers error:', err);
+    // Return basic STUN as fallback
+    res.json({ iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]});
+  }
+});
 
 // ── Start Upload Session ────────────────────────────────────────────────────
 app.post('/api/upload/start', (req, res) => {
