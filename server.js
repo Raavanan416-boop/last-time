@@ -625,10 +625,20 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('emoji-reaction', { username: socket.username, emoji, senderId: socket.id });
   });
 
-  // ── Quality Sync (creator changes quality → all users apply) ───────────────
-  socket.on('quality-change', ({ roomId, quality }) => {
-    // Broadcast to ALL other users in room
-    socket.to(roomId).emit('quality-change', { quality, from: socket.username });
+  // ── Quality Sync (ONLY creator can change quality → all users apply) ────────
+  socket.on('quality-change', ({ roomId, bitrate, label }) => {
+    roomId = roomId?.toUpperCase();
+    const room = rooms[roomId];
+    if (!room) return;
+
+    // Only allow room creator to change quality
+    if (room.videoType === 'screen' && room.creatorId !== socket.id) {
+      console.log(`⚠️ Non-creator ${socket.username} tried to change quality — blocked`);
+      return;
+    }
+
+    // Broadcast locked bitrate to ALL other users in room
+    socket.to(roomId).emit('quality-change', { bitrate, label, from: socket.username });
   });
 
   // ══════════ SCREEN SHARE SIGNALING ══════════

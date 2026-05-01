@@ -70,18 +70,15 @@ let screenStreamSent = false; // Guard: prevent sending stream tracks multiple t
 let chatToastQueue = []; // Queue for chat toast messages
 let chatToastShowing = false;
 
-/* ── Quality / Bitrate settings (reduced for stability) ── */
+/* ── Quality / Bitrate settings (LOCKED — no auto adaptation) ── */
 const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
 const QUALITY_PRESETS = {
-  auto:   { maxBitrate: isMobile ? 1500000 : 2500000, scaleDown: isMobile ? 2.0 : 1.0, label: 'Auto',   badge: isMobile ? 'SD' : 'HD' },
-  high:   { maxBitrate: 2500000, scaleDown: 1.0, label: '1080p',  badge: 'HD' },
-  medium: { maxBitrate: 1500000, scaleDown: 1.5, label: '720p',   badge: 'HD' },
-  sd:     { maxBitrate: 1200000, scaleDown: 2.0, label: '480p',   badge: 'SD' },
-  low:    { maxBitrate: 500000,  scaleDown: 3.0, label: '360p',   badge: 'SD' },
-  smooth: { maxBitrate: 1500000, scaleDown: 2.0, label: 'Smooth', badge: 'SD' }
+  '480p':  { bitrate: 800000,  scaleDown: 1.0, label: '480p',  badge: 'SD', maxFps: 30 },
+  '720p':  { bitrate: 1500000, scaleDown: 1.0, label: '720p',  badge: 'HD', maxFps: 30 },
+  '1080p': { bitrate: 2500000, scaleDown: 1.0, label: '1080p', badge: 'HD', maxFps: 30 }
 };
-let currentQuality = 'auto';
-let performanceMode = false; // false = High Quality, true = Smooth Mode
+let currentQuality = '720p'; // Default locked quality
+let currentLockedBitrate = QUALITY_PRESETS['720p'].bitrate; // Tracks the active bitrate
 
 /* ── Screen Share State ── */
 let isScreenCreator = false;
@@ -203,7 +200,8 @@ socket.on('room-info', (info) => {
   }
 
   // Show quality/fullscreen controls ONLY for screen share mode
-  updateOverlayControlsVisibility(info.videoType);
+  // Quality selector is ONLY shown to creator
+  updateOverlayControlsVisibility(info.videoType, info.isCreator);
 
   renderUserList(info.users);
   renderVoiceUserList();
@@ -211,11 +209,16 @@ socket.on('room-info', (info) => {
 });
 
 /* ── Show/hide quality+fullscreen for screen share only ── */
-function updateOverlayControlsVisibility(type) {
+function updateOverlayControlsVisibility(type, isCreator) {
   const overlayControls = document.getElementById('videoOverlayControls');
   if (!overlayControls) return;
   if (type === 'screen') {
     overlayControls.style.display = 'flex';
+    // ONLY creator sees quality selector — viewers get fullscreen only
+    const qualityWrap = document.querySelector('.quality-btn-wrap');
+    if (qualityWrap) {
+      qualityWrap.style.display = isCreator ? 'block' : 'none';
+    }
   } else {
     // Hide fullscreen + quality for upload/youtube (they have native controls)
     overlayControls.style.display = 'none';
@@ -861,8 +864,8 @@ async function startScreenShare() {
       ssStatus.textContent = '❌ Your browser does not support captureStream';
       return;
     }
-    // Capture at reduced fps for smooth, stable streaming
-    const captureFrameRate = isMobile ? 15 : 24;
+    // Capture at stable 30fps — NO adaptive reduction
+    const captureFrameRate = 30;
     screenStream = ssLocalVideo.captureStream ? ssLocalVideo.captureStream(captureFrameRate) : ssLocalVideo.mozCaptureStream();
     console.log(`[Stream] Captured at ${ssLocalVideo.videoWidth}x${ssLocalVideo.videoHeight} @${captureFrameRate}fps`);
     screenStreamSent = false; // Reset guard for new stream
@@ -901,8 +904,7 @@ async function startScreenShare() {
       if (u.id !== socket.id) createScreenPeerForViewer(u.id);
     });
 
-    // Start adaptive lag monitoring
-    startLagMonitor();
+    // NO adaptive lag monitoring — quality is LOCKED by creator only
   } catch (err) {
     console.error('Stream start failed:', err);
     ssStatus.textContent = '\u274C Failed to start - ' + (err.message || 'try again');
@@ -912,9 +914,6 @@ async function startScreenShare() {
 
 function stopScreenShare() {
   if (ssLocalVideo) { ssLocalVideo.pause(); ssLocalVideo.onended = null; }
-
-  // Stop lag monitor
-  if (lagCheckInterval) { clearInterval(lagCheckInterval); lagCheckInterval = null; }
 
   // Close all screen peer connections
   Object.values(screenPeerConnections).forEach(pc => { try { pc.close(); } catch {} });
@@ -971,8 +970,8 @@ function createScreenPeerForViewer(viewerId) {
   pc.onconnectionstatechange = () => {
     console.log(`[Screen] Connection: ${pc.connectionState} (peer: ${viewerId})`);
     if (pc.connectionState === 'connected') {
-      // Apply stable bitrate once connection is fully established
-      applyBitrate(pc);
+      // Apply LOCKED bitrate once connection is fully established
+      applyLockedBitrate(pc);
     }
     if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
       try { pc.close(); } catch {}
@@ -989,8 +988,8 @@ function createScreenPeerForViewer(viewerId) {
   }).then(() => {
     socket.emit('screen-offer', { to: viewerId, offer: pc.localDescription });
     console.log(`[Screen] Sent offer to ${viewerId}`);
-    // Apply bitrate early as a fallback
-    setTimeout(() => applyBitrate(pc), 1000);
+    // Apply locked bitrate early as a fallback
+    setTimeout(() => applyLockedBitrate(pc), 1000);
   }).catch(err => {
     console.error('[Screen] Failed to create offer:', err);
   });
@@ -1156,100 +1155,104 @@ socket.on('user-joined', ({ username: uname, users }) => {
   }
 });
 
-/* ═══════════ BITRATE CONTROL (Optimized for stability) ═══════════ */
-async function applyBitrate(pc) {
+/* ═══════════ BITRATE CONTROL (LOCKED — NO AUTO ADAPTATION) ═══════════ */
+
+/**
+ * Apply LOCKED bitrate to a single peer connection.
+ * Both minBitrate and maxBitrate are set EQUAL to prevent
+ * any automatic quality adaptation by the browser/WebRTC.
+ * Uses SINGLE encoding only — no simulcast.
+ */
+async function applyLockedBitrate(pc) {
   try {
     const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
     if (!sender) { console.warn('No video sender found'); return; }
 
     const params = sender.getParameters();
+    // Force SINGLE encoding — no simulcast
     if (!params.encodings || params.encodings.length === 0) {
       params.encodings = [{}];
     }
+    // Remove any extra encodings (prevent simulcast)
+    while (params.encodings.length > 1) {
+      params.encodings.pop();
+    }
 
-    const effectiveQuality = performanceMode ? 'smooth' : currentQuality;
-    const preset = QUALITY_PRESETS[effectiveQuality] || QUALITY_PRESETS.auto;
-
-    // Performance safety: cap at 3 Mbps max for stability
-    const MAX_SAFE_BITRATE = 3000000;
-    params.encodings[0].maxBitrate = Math.min(preset.maxBitrate, MAX_SAFE_BITRATE);
-    params.encodings[0].scaleResolutionDownBy = preset.scaleDown || 1.0;
-    // Limit max framerate for stability
-    params.encodings[0].maxFramerate = isMobile ? 15 : 24;
-    // Prioritize framerate to avoid stutter/buffering
+    // LOCK bitrate: min === max to prevent auto-adaptation
+    params.encodings[0].maxBitrate = currentLockedBitrate;
+    params.encodings[0].minBitrate = currentLockedBitrate;
+    params.encodings[0].scaleResolutionDownBy = 1.0;
+    // Stable 30fps for all
+    params.encodings[0].maxFramerate = 30;
+    // Do NOT use adaptive degradation
     params.degradationPreference = 'maintain-framerate';
 
     await sender.setParameters(params);
 
-    // Debug logs
-    console.log(`[Quality] Bitrate: ${(params.encodings[0].maxBitrate / 1000000).toFixed(1)} Mbps | Scale: ${preset.scaleDown}x | Mode: ${preset.label} | Mobile: ${isMobile}`);
+    console.log(`[Quality] LOCKED Bitrate: ${(currentLockedBitrate / 1000000).toFixed(1)} Mbps | FPS: 30 | Quality: ${currentQuality}`);
   } catch (err) {
-    console.warn('Failed to set bitrate:', err);
+    console.warn('Failed to set locked bitrate:', err);
   }
 }
 
-/* Adaptive fallback: auto-downgrade quality if lag detected */
-let lagCheckInterval = null;
-function startLagMonitor() {
-  if (lagCheckInterval) return;
-  lagCheckInterval = setInterval(async () => {
-    for (const pc of Object.values(screenPeerConnections)) {
-      try {
-        const stats = await pc.getStats();
-        stats.forEach(report => {
-          if (report.type === 'outbound-rtp' && report.kind === 'video') {
-            if (report.qualityLimitationReason === 'bandwidth' && currentQuality !== 'low') {
-              console.warn('[Perf] Bandwidth limited, auto-downgrading quality');
-              changeQuality('low');
-            }
-          }
-        });
-      } catch {}
-    }
-  }, 8000);
-}
+/**
+ * Set locked quality — ONLY called by creator.
+ * Changes bitrate for all peer connections and syncs to all viewers.
+ */
+function setLockedQuality(qualityKey) {
+  const preset = QUALITY_PRESETS[qualityKey];
+  if (!preset) return;
 
-function changeQuality(quality) {
-  currentQuality = quality;
-  performanceMode = (quality === 'smooth');
-  const preset = QUALITY_PRESETS[quality];
+  currentQuality = qualityKey;
+  currentLockedBitrate = preset.bitrate;
+
   // Apply to all active screen peer connections
-  Object.values(screenPeerConnections).forEach(pc => applyBitrate(pc));
+  Object.values(screenPeerConnections).forEach(pc => applyLockedBitrate(pc));
   updateQualityBadge();
+
   // Update selector UI
   document.querySelectorAll('.quality-option').forEach(opt => {
-    opt.classList.toggle('active', opt.dataset.quality === quality);
+    opt.classList.toggle('active', opt.dataset.quality === qualityKey);
   });
-  // Update performance mode toggle
-  const perfToggle = document.getElementById('perfModeToggle');
-  if (perfToggle) perfToggle.classList.toggle('active', performanceMode);
+
   // Close quality panel
   const qp = document.getElementById('qualityPanel');
   if (qp) qp.classList.remove('show');
+
   showSyncToast(`Quality: ${preset.label}`);
-  // Sync quality to all users in room
-  socket.emit('quality-change', { roomId: ROOM_ID, quality });
+
+  // Sync locked bitrate to all users in room (server validates creator)
+  socket.emit('quality-change', { roomId: ROOM_ID, bitrate: preset.bitrate, label: preset.label });
 }
 
-/* -- Quality sync: receive quality change from another user -- */
-socket.on('quality-change', ({ quality, from }) => {
-  currentQuality = quality;
-  performanceMode = (quality === 'smooth');
-  const preset = QUALITY_PRESETS[quality] || QUALITY_PRESETS.auto;
-  // Apply to all active screen peer connections
-  Object.values(screenPeerConnections).forEach(pc => applyBitrate(pc));
+/**
+ * Receive quality change from creator (viewers apply it).
+ * ONLY shown as toast when creator actually clicked — not auto.
+ */
+socket.on('quality-change', ({ bitrate, label, from }) => {
+  // Apply the locked bitrate from creator
+  currentLockedBitrate = bitrate;
+  // Find matching preset for UI update
+  const matchKey = Object.keys(QUALITY_PRESETS).find(k => QUALITY_PRESETS[k].bitrate === bitrate);
+  if (matchKey) currentQuality = matchKey;
+
+  // Apply to all active screen peer connections (viewers)
+  Object.values(screenPeerConnections).forEach(pc => applyLockedBitrate(pc));
   updateQualityBadge();
+
   document.querySelectorAll('.quality-option').forEach(opt => {
-    opt.classList.toggle('active', opt.dataset.quality === quality);
+    const optPreset = QUALITY_PRESETS[opt.dataset.quality];
+    opt.classList.toggle('active', optPreset && optPreset.bitrate === bitrate);
   });
-  showSyncToast(`${from} changed quality to ${preset.label}`);
+
+  // Only show message when creator actually clicks (this event only fires on real click)
+  showSyncToast(`${from} changed quality to ${label}`);
 });
 
 function updateQualityBadge() {
   const badge = document.getElementById('qualityBadge');
   if (!badge) return;
-  const effectiveQuality = performanceMode ? 'smooth' : currentQuality;
-  const preset = QUALITY_PRESETS[effectiveQuality] || QUALITY_PRESETS.auto;
+  const preset = QUALITY_PRESETS[currentQuality] || QUALITY_PRESETS['720p'];
   badge.textContent = preset.badge;
   badge.className = 'quality-badge ' + (preset.badge === 'HD' ? 'hd' : 'sd');
 }
@@ -1283,7 +1286,7 @@ videoWrap.addEventListener('touchend', (e) => {
 const fsBtn = document.getElementById('fullscreenBtn');
 if (fsBtn) fsBtn.addEventListener('click', toggleFullscreen);
 
-// Quality settings button
+// Quality settings button (CREATOR ONLY — visibility controlled by updateOverlayControlsVisibility)
 const qualityBtn = document.getElementById('qualityBtn');
 const qualityPanel = document.getElementById('qualityPanel');
 if (qualityBtn && qualityPanel) {
@@ -1294,7 +1297,7 @@ if (qualityBtn && qualityPanel) {
   document.addEventListener('click', () => qualityPanel.classList.remove('show'));
   qualityPanel.addEventListener('click', e => e.stopPropagation());
   qualityPanel.querySelectorAll('.quality-option').forEach(opt => {
-    opt.addEventListener('click', () => changeQuality(opt.dataset.quality));
+    opt.addEventListener('click', () => setLockedQuality(opt.dataset.quality));
   });
 }
 
