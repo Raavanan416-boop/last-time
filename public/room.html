@@ -14,6 +14,12 @@
     <div class="room-header">
       <h1>🎬 Movie<span>Time</span></h1>
       <p>Create a room or join an existing one</p>
+      <!-- User name display + change name (ALLOWED before joining) -->
+      <div class="room-user-badge" id="roomUserBadge">
+        <span class="rub-dot"></span>
+        <span class="rub-name" id="roomUsername"></span>
+        <button class="rub-change-btn" id="roomChangeNameBtn">✏️ Change Name</button>
+      </div>
     </div>
 
     <div class="tabs-container">
@@ -94,30 +100,77 @@
                   </div>
                 </div>
 
-                <!-- SUB-PANEL: Screen Share -->
+                <!-- SUB-PANEL: Screen Share (2 modes) -->
                 <div class="tab-panel">
                   <div class="glass screen-share-panel">
-                    <div class="screen-share-hero">
-                      <div class="ss-icon-wrap">
-                        <span class="ss-icon">🎬</span>
-                        <span class="ss-pulse"></span>
-                      </div>
-                      <h3 class="ss-title">Stream Video Live</h3>
-                      <p class="ss-desc">Select a video from your device and stream it<br>live to everyone in the room.</p>
+                    <!-- Mode selector -->
+                    <div class="ss-mode-selector">
+                      <button class="ss-mode-btn active" id="ssModeFileBtn" data-mode="file">
+                        <span class="ss-mode-icon">📁</span>
+                        <span class="ss-mode-label">Share Video File</span>
+                      </button>
+                      <button class="ss-mode-btn" id="ssModeFullBtn" data-mode="fullscreen">
+                        <span class="ss-mode-icon">🖥️</span>
+                        <span class="ss-mode-label">Share Full Screen</span>
+                      </button>
                     </div>
-                    <div class="ss-features">
-                      <div class="ss-feature-item">
-                        <span>📁</span> Pick video from gallery
+
+                    <!-- MODE: Video File -->
+                    <div class="ss-mode-content" id="ssModeFileContent">
+                      <div class="screen-share-hero">
+                        <div class="ss-icon-wrap">
+                          <span class="ss-icon">🎬</span>
+                          <span class="ss-pulse"></span>
+                        </div>
+                        <h3 class="ss-title">Stream Video Live</h3>
+                        <p class="ss-desc">Select a video from your device and stream it<br>live to everyone in the room.</p>
                       </div>
-                      <div class="ss-feature-item">
-                        <span>🔊</span> Video audio included
+                      <div class="ss-features">
+                        <div class="ss-feature-item">
+                          <span>📁</span> Pick video from gallery
+                        </div>
+                        <div class="ss-feature-item">
+                          <span>🔊</span> Video audio included
+                        </div>
+                        <div class="ss-feature-item">
+                          <span>👥</span> Stream to all viewers
+                        </div>
                       </div>
-                      <div class="ss-feature-item">
-                        <span>👥</span> Stream to all viewers
+                      <div class="form-group">
+                        <button class="btn-primary ss-create-btn" id="createScreenBtn">🎬 Create Streaming Room</button>
                       </div>
                     </div>
-                    <div class="form-group">
-                      <button class="btn-primary ss-create-btn" id="createScreenBtn">🎬 Create Streaming Room</button>
+
+                    <!-- MODE: Full Screen Share -->
+                    <div class="ss-mode-content" id="ssModeFullContent" style="display:none">
+                      <div class="screen-share-hero">
+                        <div class="ss-icon-wrap">
+                          <span class="ss-icon">🖥️</span>
+                          <span class="ss-pulse"></span>
+                        </div>
+                        <h3 class="ss-title">Live Screen Sharing</h3>
+                        <p class="ss-desc">Share your entire screen, a window, or a tab<br>in real-time with HD quality.</p>
+                      </div>
+                      <div class="ss-features">
+                        <div class="ss-feature-item">
+                          <span>🖥️</span> Full screen / window / tab
+                        </div>
+                        <div class="ss-feature-item">
+                          <span>🔊</span> System audio included
+                        </div>
+                        <div class="ss-feature-item">
+                          <span>📺</span> Up to 1080p HD quality
+                        </div>
+                        <div class="ss-feature-item">
+                          <span>👥</span> Real-time to all viewers
+                        </div>
+                      </div>
+                      <div class="ss-mobile-note" id="ssMobileNote" style="display:none">
+                        <span>📱</span> Screen share works best on laptop / desktop browsers
+                      </div>
+                      <div class="form-group">
+                        <button class="btn-primary ss-create-btn ss-fullscreen-btn" id="createFullScreenBtn">🖥️ Create Screen Share Room</button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -146,8 +199,24 @@
 
   <script>
     /* ── Guard: username required ── */
-    const username = localStorage.getItem('mt_username');
+    let username = localStorage.getItem('mt_username');
     if (!username) window.location.href = 'index.html';
+
+    /* ── Display current username ── */
+    const roomUsernameEl = document.getElementById('roomUsername');
+    roomUsernameEl.textContent = username;
+
+    /* ── Change Name (ALLOWED here — before joining room) ── */
+    document.getElementById('roomChangeNameBtn').addEventListener('click', () => {
+      const newName = prompt('Enter new display name (max 15 characters):', username);
+      if (newName && newName.trim() !== '' && newName.trim().length <= 15) {
+        username = newName.trim();
+        localStorage.setItem('mt_username', username);
+        roomUsernameEl.textContent = username;
+      } else if (newName !== null && newName.trim().length > 15) {
+        alert('Name must be 15 characters or less');
+      }
+    });
 
     /* ════════════════════════════════════════
        REUSABLE SWIPE-TAB CONTROLLER (N-tabs)
@@ -429,7 +498,31 @@
       }
     });
 
-    /* ════════════ CREATE: SCREEN SHARE ════════════ */
+    /* ════════════ SCREEN SHARE MODE TOGGLE ════════════ */
+    let currentScreenMode = 'file'; // 'file' or 'fullscreen'
+    const ssModeFileBtn = document.getElementById('ssModeFileBtn');
+    const ssModeFullBtn = document.getElementById('ssModeFullBtn');
+    const ssModeFileContent = document.getElementById('ssModeFileContent');
+    const ssModeFullContent = document.getElementById('ssModeFullContent');
+
+    function setScreenMode(mode) {
+      currentScreenMode = mode;
+      ssModeFileBtn.classList.toggle('active', mode === 'file');
+      ssModeFullBtn.classList.toggle('active', mode === 'fullscreen');
+      ssModeFileContent.style.display = mode === 'file' ? 'block' : 'none';
+      ssModeFullContent.style.display = mode === 'fullscreen' ? 'block' : 'none';
+    }
+    ssModeFileBtn.addEventListener('click', () => setScreenMode('file'));
+    ssModeFullBtn.addEventListener('click', () => setScreenMode('fullscreen'));
+
+    // Show mobile warning for fullscreen mode
+    const isMobileDevice = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
+    if (isMobileDevice) {
+      const note = document.getElementById('ssMobileNote');
+      if (note) note.style.display = 'flex';
+    }
+
+    /* ════════════ CREATE: SCREEN SHARE (Video File) ════════════ */
     document.getElementById('createScreenBtn').addEventListener('click', async () => {
       const roomName = document.getElementById('roomNameInput').value.trim();
       if (!roomName) {
@@ -446,11 +539,10 @@
         const res = await fetch('/api/create-room', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ roomName, videoType: 'screen' })
+          body: JSON.stringify({ roomName, videoType: 'screen', screenMode: 'file' })
         });
         const data = await res.json();
         if (res.ok) {
-          // Mark this user as the creator so player.html knows
           localStorage.setItem('mt_screen_creator_' + data.roomId, 'true');
           window.location.href = `player.html?room=${data.roomId}`;
         } else {
@@ -462,6 +554,41 @@
         alert('Network error. Please try again.');
         btn.disabled = false;
         btn.textContent = '🎬 Create Streaming Room';
+      }
+    });
+
+    /* ════════════ CREATE: FULL SCREEN SHARE ════════════ */
+    document.getElementById('createFullScreenBtn').addEventListener('click', async () => {
+      const roomName = document.getElementById('roomNameInput').value.trim();
+      if (!roomName) {
+        document.getElementById('roomNameInput').classList.add('shake');
+        setTimeout(() => document.getElementById('roomNameInput').classList.remove('shake'), 500);
+        return;
+      }
+
+      const btn = document.getElementById('createFullScreenBtn');
+      btn.disabled = true;
+      btn.textContent = '⏳ Creating...';
+
+      try {
+        const res = await fetch('/api/create-room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomName, videoType: 'screen', screenMode: 'fullscreen' })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          localStorage.setItem('mt_screen_creator_' + data.roomId, 'true');
+          window.location.href = `player.html?room=${data.roomId}`;
+        } else {
+          alert(data.error || 'Failed to create room');
+          btn.disabled = false;
+          btn.textContent = '🖥️ Create Screen Share Room';
+        }
+      } catch {
+        alert('Network error. Please try again.');
+        btn.disabled = false;
+        btn.textContent = '🖥️ Create Screen Share Room';
       }
     });
 

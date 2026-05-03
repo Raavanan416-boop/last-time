@@ -43,6 +43,9 @@
     <div class="player-main">
       <div class="player-col">
         <div class="video-wrap" id="videoWrap">
+          <!-- Video placeholder (replaced dynamically) -->
+          <div id="videoPlaceholder" class="video-placeholder"></div>
+
           <!-- Overlay UI: persists in fullscreen (inside video container) -->
           <div id="overlayUI" class="overlay-ui">
             <div class="sync-toast" id="syncToast"></div>
@@ -53,14 +56,15 @@
           <!-- Video overlay controls (quality, fullscreen, badge) -->
           <div class="video-overlay-controls" id="videoOverlayControls">
             <div class="quality-badge-wrap">
-              <span class="quality-badge hd" id="qualityBadge">HD</span>
+              <span class="quality-badge hd" id="qualityBadge">720p</span>
+              <span class="quality-host-label" id="qualityHostLabel">Quality: 720p (Host Controlled)</span>
             </div>
             <div class="overlay-btns">
-              <!-- Quality selector -->
+              <!-- Quality selector (ONLY visible to creator) -->
               <div class="quality-btn-wrap">
                 <button class="overlay-icon-btn" id="qualityBtn" title="Video Quality">⚙️</button>
                 <div class="quality-panel" id="qualityPanel">
-                  <div class="quality-panel-title">Video Quality (Locked)</div>
+                  <div class="quality-panel-title">Video Quality (Host Only)</div>
                   <div class="quality-option" data-quality="480p">
                     <span class="qo-label">480p</span>
                     <span class="qo-badge sd">SD</span>
@@ -80,17 +84,24 @@
             </div>
           </div>
 
-          <!-- Screen share waiting message (hidden by default) -->
-          <div class="screen-waiting" id="screenWaiting" style="display:none">
+          <!-- Universal waiting screen (shown until stream/video starts) -->
+          <div class="screen-waiting" id="screenWaiting" style="display:flex">
             <div class="sw-content">
-              <div class="sw-icon">🎬</div>
+              <div class="sw-icon" id="swIcon">🎬</div>
               <div class="sw-pulse-ring"></div>
-              <h3>Waiting for friend to play video...</h3>
-              <p>The room creator will select and play a video soon</p>
+              <div class="sw-shimmer"></div>
+              <h3 id="swTitle">Waiting for host to start...</h3>
+              <p id="swSubtitle">The room creator will begin shortly</p>
             </div>
           </div>
+
+          <!-- Live Screen Sharing label (shown when fullscreen share active) -->
+          <div class="live-screen-label" id="liveScreenLabel" style="display:none">
+            <span class="lsl-dot"></span>
+            <span class="lsl-text">Live Screen Sharing</span>
+          </div>
         </div>
-        <!-- Screen share controls (creator only, hidden by default) -->
+        <!-- Screen share controls: VIDEO FILE (creator only, hidden by default) -->
         <div class="screen-share-controls" id="screenShareControls" style="display:none">
           <div class="ss-file-row">
             <label class="btn-file-select" id="fileSelectLabel">
@@ -110,6 +121,20 @@
               <span class="ss-btn-text">Stop Streaming</span>
             </button>
             <div class="ss-status" id="ssStatus"></div>
+          </div>
+        </div>
+        <!-- Screen share controls: FULL SCREEN (creator only, hidden by default) -->
+        <div class="fullscreen-share-controls" id="fullscreenShareControls" style="display:none">
+          <div class="fss-action-row">
+            <button class="btn-screen-share fss-start-btn" id="startFullScreenShareBtn">
+              <span class="ss-btn-icon">🖥️</span>
+              <span class="ss-btn-text">Start Screen Share</span>
+            </button>
+            <button class="btn-stop-share" id="stopFullScreenShareBtn" style="display:none">
+              <span class="ss-btn-icon">⏹️</span>
+              <span class="ss-btn-text">Stop Screen Share</span>
+            </button>
+            <div class="ss-status" id="fssStatus"></div>
           </div>
         </div>
         <!-- Creator local video preview (hidden by default) -->
@@ -202,6 +227,8 @@
       </div>
     </div>
   </div>
+
+
 
   <!-- YouTube API -->
   <script src="https://www.youtube.com/iframe_api"></script>

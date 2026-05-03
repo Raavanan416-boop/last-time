@@ -50,6 +50,7 @@ app.use(express.json({ limit: '1mb' }));
 //   videoId        : string   — YouTube video ID          (youtube only)
 //   creatorId      : string   — socket id of creator      (screen only)
 //   screenActive   : boolean  — is screen share active?   (screen only)
+//   screenMode    : 'file' | 'fullscreen' — screen share type  (screen only)
 //   users          : [{ id, username }],
 //   timeout        : NodeJS.Timeout | null — auto-delete timer
 // }
@@ -411,16 +412,18 @@ app.post('/api/create-room', (req, res) => {
 
     } else if (videoType === 'screen') {
       // Screen share room — no video file, just WebRTC
+      const mode = req.body.screenMode || 'file'; // 'file' or 'fullscreen'
       rooms[roomId] = {
         name,
         videoType: 'screen',
+        screenMode: mode,
         creatorId: null, // Set when creator joins via socket
         screenActive: false,
         users: [],
         timeout: null
       };
-      console.log(`✓ Room ${roomId} created (screen share)`);
-      res.json({ roomId, videoType: 'screen' });
+      console.log(`✓ Room ${roomId} created (screen share — mode: ${mode})`);
+      res.json({ roomId, videoType: 'screen', screenMode: mode });
 
     } else {
       return res.status(400).json({ error: 'Provide an uploaded video, YouTube URL, or select Screen Share' });
@@ -441,6 +444,7 @@ app.get('/api/room/:roomId', (req, res) => {
     videoToken   : room.videoToken || null,
     videoId      : room.videoId   || null,
     screenActive : room.screenActive || false,
+    screenMode   : room.screenMode || null,
     userCount    : room.users.length
   });
 });
@@ -578,6 +582,7 @@ io.on('connection', (socket) => {
       userCount    : room.users.length,
       isCreator    : room.videoType === 'screen' && room.creatorId === socket.id,
       screenActive : room.screenActive || false,
+      screenMode   : room.screenMode || null,
       creatorId    : room.creatorId || null
     });
 
@@ -623,6 +628,14 @@ io.on('connection', (socket) => {
   socket.on('emoji-reaction', ({ roomId, emoji }) => {
     // Broadcast to ALL users in room (including sender for reliable delivery)
     io.to(roomId).emit('emoji-reaction', { username: socket.username, emoji, senderId: socket.id });
+  });
+
+  // ── Change Name — BLOCKED inside room ───────────────────────────────────────
+  // Name changes are ONLY allowed from room.html (before joining).
+  // Once in a room, name is locked. This handler rejects any attempts.
+  socket.on('change-name', ({ roomId }) => {
+    console.log(`⚠️ Name change BLOCKED for ${socket.username} in room ${roomId} — not allowed after joining`);
+    // Do NOT process — name is locked inside room
   });
 
   // ── Quality Sync (ONLY creator can change quality → all users apply) ────────

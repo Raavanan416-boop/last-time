@@ -9,7 +9,7 @@
 /* ══════════ INIT ══════════ */
 const params = new URLSearchParams(location.search);
 const ROOM_ID = params.get('room');
-const USERNAME = localStorage.getItem('mt_username');
+let USERNAME = localStorage.getItem('mt_username');
 if (!ROOM_ID || !USERNAME) { location.href = 'index.html'; }
 
 const socket = io();
@@ -85,11 +85,66 @@ let isScreenCreator = false;
 let screenStream = null;
 const screenPeerConnections = {};
 let screenActive = false;
+let screenMode = 'file'; // 'file' or 'fullscreen'
 const screenWaiting = document.getElementById('screenWaiting');
 const screenShareControls = document.getElementById('screenShareControls');
 const startScreenShareBtn = document.getElementById('startScreenShareBtn');
 const stopScreenShareBtn = document.getElementById('stopScreenShareBtn');
 const ssStatus = document.getElementById('ssStatus');
+
+/* ── Full Screen Share DOM refs ── */
+const fullscreenShareControls = document.getElementById('fullscreenShareControls');
+const startFullScreenShareBtn = document.getElementById('startFullScreenShareBtn');
+const stopFullScreenShareBtn = document.getElementById('stopFullScreenShareBtn');
+const fssStatus = document.getElementById('fssStatus');
+const liveScreenLabel = document.getElementById('liveScreenLabel');
+
+/* ── Waiting Screen DOM refs ── */
+const swIcon = document.getElementById('swIcon');
+const swTitle = document.getElementById('swTitle');
+const swSubtitle = document.getElementById('swSubtitle');
+
+/* ── Force waiting screen visible on load (before room-info arrives) ── */
+if (screenWaiting) {
+  screenWaiting.style.display = 'flex';
+}
+
+/* ── Debug checks ── */
+console.log('Waiting element:', document.getElementById('screenWaiting'));
+console.log('isInRoom:', true, '— Name change BLOCKED inside room');
+
+/* ── Waiting Screen Helpers ── */
+function showWaitingScreen(type) {
+  if (!screenWaiting) return;
+
+  // Set mode-specific content
+  if (type === 'fullscreen') {
+    if (swIcon) swIcon.textContent = '\uD83D\uDDA5\uFE0F';
+    if (swTitle) swTitle.textContent = 'Waiting for host to share screen...';
+    if (swSubtitle) swSubtitle.textContent = 'The room creator will start sharing their screen soon';
+  } else if (type === 'file') {
+    if (swIcon) swIcon.textContent = '\uD83C\uDFAC';
+    if (swTitle) swTitle.textContent = 'Waiting for host to play video...';
+    if (swSubtitle) swSubtitle.textContent = 'The room creator will select and stream a video soon';
+  } else if (type === 'ended') {
+    if (swIcon) swIcon.textContent = '\uD83D\uDEAB';
+    if (swTitle) swTitle.textContent = 'Stream ended';
+    if (swSubtitle) swSubtitle.textContent = 'The host has stopped sharing. Waiting for them to restart...';
+  } else {
+    if (swIcon) swIcon.textContent = '\uD83C\uDFAC';
+    if (swTitle) swTitle.textContent = 'Waiting for host to start...';
+    if (swSubtitle) swSubtitle.textContent = 'The room creator will begin shortly';
+  }
+
+  screenWaiting.style.display = 'flex';
+}
+
+function hideWaitingScreen() {
+  if (screenWaiting) screenWaiting.style.display = 'none';
+  // Also hide placeholder when video is ready
+  const placeholder = document.getElementById('videoPlaceholder');
+  if (placeholder) placeholder.style.display = 'none';
+}
 
 /* Helper: set syncing flag with auto-clear */
 function startSyncing() {
@@ -192,8 +247,10 @@ socket.on('room-info', (info) => {
 
   // Load video based on type for ALL users
   if (info.videoType === 'file' && info.videoToken) {
+    hideWaitingScreen();
     setupFileVideo(info.videoToken);
   } else if (info.videoType === 'youtube' && info.videoId) {
+    hideWaitingScreen();
     setupYouTube(info.videoId);
   } else if (info.videoType === 'screen') {
     setupScreenShareRoom(info);
@@ -206,6 +263,9 @@ socket.on('room-info', (info) => {
   renderUserList(info.users);
   renderVoiceUserList();
   initVoice(info.users);
+
+  // Store screenMode for later use
+  if (info.screenMode) screenMode = info.screenMode;
 });
 
 /* ── Show/hide quality+fullscreen for screen share only ── */
@@ -521,6 +581,11 @@ socket.on('user-left', ({ username: uname, users, userCount }) => {
   renderVoiceUserList();
 });
 
+/* ══════════ NAME CHANGE — LOCKED (Not allowed after joining room) ══════════ */
+const isInRoom = true; // User is inside the room — name change BLOCKED
+// Name can ONLY be changed from room.html (before creating/joining a room)
+
+
 /* ══════════ USER LIST POPUP ══════════ */
 usersBtn.addEventListener('click', () => usersPopup.classList.add('show'));
 document.getElementById('closeUsersPopup').addEventListener('click', () => usersPopup.classList.remove('show'));
@@ -584,7 +649,10 @@ document.getElementById('continueBtn').addEventListener('click', () => leavePopu
 document.getElementById('confirmLeaveBtn').addEventListener('click', () => {
   // Stop screen share if creator
   if (isScreenCreator && screenStream) {
-    screenStream.getTracks().forEach(t => t.stop());
+    screenStream.getTracks().forEach(t => {
+      t.onended = null;
+      t.stop();
+    });
     socket.emit('stop-screen-share', { roomId: ROOM_ID });
   }
   Object.values(screenPeerConnections).forEach(pc => pc.close());
@@ -798,34 +866,54 @@ const ssLocalVideo = document.getElementById('ssLocalVideo');
 
 function setupScreenShareRoom(info) {
   isScreenCreator = info.isCreator;
+  screenMode = info.screenMode || 'file';
 
   if (isScreenCreator) {
-    if (screenShareControls) screenShareControls.style.display = 'block';
-    if (screenWaiting) screenWaiting.style.display = 'none';
+    // Creator: hide waiting, show controls
+    hideWaitingScreen();
 
-    screenFileInput.addEventListener('change', () => {
-      const file = screenFileInput.files[0];
-      if (!file) return;
-      ssFileName.textContent = file.name;
-      ssFileName.classList.add('has-file');
-      const url = URL.createObjectURL(file);
-      ssLocalVideo.src = url;
-      ssLocalVideo.load();
-      ssLocalPreviewWrap.style.display = 'block';
-      startScreenShareBtn.disabled = false;
-      // Reset if re-selecting file
-      if (screenActive) stopScreenShare();
-    });
+    if (screenMode === 'file') {
+      // Video file mode
+      if (screenShareControls) screenShareControls.style.display = 'block';
+      if (fullscreenShareControls) fullscreenShareControls.style.display = 'none';
 
-    startScreenShareBtn.addEventListener('click', startScreenShare);
-    stopScreenShareBtn.addEventListener('click', stopScreenShare);
+      screenFileInput.addEventListener('change', () => {
+        const file = screenFileInput.files[0];
+        if (!file) return;
+        ssFileName.textContent = file.name;
+        ssFileName.classList.add('has-file');
+        const url = URL.createObjectURL(file);
+        ssLocalVideo.src = url;
+        ssLocalVideo.load();
+        ssLocalPreviewWrap.style.display = 'block';
+        startScreenShareBtn.disabled = false;
+        // Reset if re-selecting file
+        if (screenActive) stopScreenShare();
+      });
+
+      startScreenShareBtn.addEventListener('click', startScreenShare);
+      stopScreenShareBtn.addEventListener('click', stopScreenShare);
+    } else {
+      // Full screen share mode (getDisplayMedia)
+      if (screenShareControls) screenShareControls.style.display = 'none';
+      if (fullscreenShareControls) fullscreenShareControls.style.display = 'block';
+      if (ssLocalPreviewWrap) ssLocalPreviewWrap.style.display = 'none';
+
+      startFullScreenShareBtn.addEventListener('click', startFullScreenShare);
+      stopFullScreenShareBtn.addEventListener('click', stopFullScreenShare);
+    }
   } else {
+    // Viewer
     if (screenShareControls) screenShareControls.style.display = 'none';
+    if (fullscreenShareControls) fullscreenShareControls.style.display = 'none';
     if (info.screenActive) {
       socket.emit('request-screen-stream', { roomId: ROOM_ID });
-      if (screenWaiting) screenWaiting.style.display = 'none';
+      hideWaitingScreen();
+      // Show live label for fullscreen mode viewers
+      if (screenMode === 'fullscreen' && liveScreenLabel) liveScreenLabel.style.display = 'flex';
     } else {
-      if (screenWaiting) screenWaiting.style.display = 'flex';
+      // Show mode-appropriate waiting message
+      showWaitingScreen(screenMode === 'fullscreen' ? 'fullscreen' : 'file');
     }
   }
 }
@@ -930,6 +1018,95 @@ function stopScreenShare() {
   socket.emit('stop-screen-share', { roomId: ROOM_ID });
 }
 
+/* ═══ FULL SCREEN SHARE (getDisplayMedia) ═══ */
+async function startFullScreenShare() {
+  try {
+    fssStatus.textContent = '⏳ Requesting screen access...';
+
+    // Use getDisplayMedia for real screen capture
+    screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 24, max: 30 }
+      },
+      audio: true
+    });
+
+    screenStreamSent = false;
+
+    const tracks = screenStream.getTracks();
+    console.log('[FullScreen] getDisplayMedia ready - ' + tracks.length + ' tracks:', tracks.map(t => `${t.kind}:${t.readyState}`));
+
+    if (tracks.length === 0) {
+      fssStatus.textContent = '\u274C No screen captured — try again';
+      return;
+    }
+
+    // Auto-stop when user stops sharing via browser UI
+    screenStream.getTracks().forEach(track => {
+      track.onended = () => {
+        console.log('[FullScreen] Track ended (user stopped sharing)');
+        stopFullScreenShare();
+      };
+    });
+
+    // Update UI
+    startFullScreenShareBtn.style.display = 'none';
+    stopFullScreenShareBtn.style.display = 'inline-flex';
+    fssStatus.textContent = '\uD83D\uDD34 Live \u2014 Sharing screen to room';
+    fssStatus.classList.add('live');
+    screenActive = true;
+
+    // Show live label
+    if (liveScreenLabel) liveScreenLabel.style.display = 'flex';
+
+    // Notify server
+    socket.emit('start-screen-share', { roomId: ROOM_ID });
+
+    // Send stream to all existing viewers
+    currentUsers.forEach(u => {
+      if (u.id !== socket.id) createScreenPeerForViewer(u.id);
+    });
+
+  } catch (err) {
+    console.error('Full screen share start failed:', err);
+    if (err.name === 'NotAllowedError') {
+      fssStatus.textContent = '\u274C Screen share was cancelled';
+    } else {
+      fssStatus.textContent = '\u274C Failed — ' + (err.message || 'try again');
+    }
+    setTimeout(() => { fssStatus.textContent = ''; }, 4000);
+  }
+}
+
+function stopFullScreenShare() {
+  // Stop all getDisplayMedia tracks
+  if (screenStream) {
+    screenStream.getTracks().forEach(t => {
+      t.onended = null;
+      t.stop();
+    });
+  }
+
+  // Close all screen peer connections
+  Object.values(screenPeerConnections).forEach(pc => { try { pc.close(); } catch {} });
+  Object.keys(screenPeerConnections).forEach(k => delete screenPeerConnections[k]);
+
+  screenStream = null;
+
+  startFullScreenShareBtn.style.display = 'inline-flex';
+  stopFullScreenShareBtn.style.display = 'none';
+  fssStatus.textContent = '';
+  fssStatus.classList.remove('live');
+  screenActive = false;
+
+  // Hide live label
+  if (liveScreenLabel) liveScreenLabel.style.display = 'none';
+
+  socket.emit('stop-screen-share', { roomId: ROOM_ID });
+}
+
 function createScreenPeerForViewer(viewerId) {
   // Clean up existing connection
   if (screenPeerConnections[viewerId]) {
@@ -1018,7 +1195,7 @@ socket.on('screen-offer', async ({ from, offer }) => {
 
   pc.ontrack = (event) => {
     console.log('Received track from creator:', event.track.kind, event.track.readyState);
-    if (screenWaiting) screenWaiting.style.display = 'none';
+    hideWaitingScreen();
 
     let v = document.getElementById('screenVideo');
     if (!v) {
@@ -1125,10 +1302,12 @@ socket.on('screen-ice-candidate', async ({ from, candidate }) => {
 // ── Screen share started notification ──
 socket.on('screen-share-started', ({ creatorName }) => {
   if (!isScreenCreator) {
-    if (screenWaiting) screenWaiting.style.display = 'none';
+    hideWaitingScreen();
     socket.emit('request-screen-stream', { roomId: ROOM_ID });
+    // Show live label for fullscreen mode
+    if (screenMode === 'fullscreen' && liveScreenLabel) liveScreenLabel.style.display = 'flex';
   }
-  showSyncToast(`${creatorName} started streaming video`);
+  showSyncToast(`${creatorName} started ${screenMode === 'fullscreen' ? 'screen sharing' : 'streaming video'}`);
 });
 
 // ── Screen share stopped notification ──
@@ -1136,11 +1315,18 @@ socket.on('screen-share-stopped', ({ reason }) => {
   if (!isScreenCreator) {
     const v = document.getElementById('screenVideo');
     if (v) { v.srcObject = null; v.remove(); }
-    if (screenWaiting) screenWaiting.style.display = 'flex';
+    // Show waiting screen again with appropriate message
+    if (reason === 'creator-left') {
+      showWaitingScreen('ended');
+    } else {
+      showWaitingScreen(screenMode === 'fullscreen' ? 'fullscreen' : 'file');
+    }
     Object.values(screenPeerConnections).forEach(pc => { try { pc.close(); } catch {} });
     Object.keys(screenPeerConnections).forEach(k => delete screenPeerConnections[k]);
+    // Hide live label
+    if (liveScreenLabel) liveScreenLabel.style.display = 'none';
   }
-  showSyncToast(reason === 'creator-left' ? 'Host left - stream ended' : 'Video stream stopped');
+  showSyncToast(reason === 'creator-left' ? 'Host left - stream ended' : `${screenMode === 'fullscreen' ? 'Screen share' : 'Video stream'} stopped`);
 });
 
 // ── When new user joins a screen room, creator sends them the stream ──
@@ -1253,8 +1439,14 @@ function updateQualityBadge() {
   const badge = document.getElementById('qualityBadge');
   if (!badge) return;
   const preset = QUALITY_PRESETS[currentQuality] || QUALITY_PRESETS['720p'];
-  badge.textContent = preset.badge;
+  badge.textContent = preset.label;
   badge.className = 'quality-badge ' + (preset.badge === 'HD' ? 'hd' : 'sd');
+
+  // Update host-controlled label if present
+  const hostLabel = document.getElementById('qualityHostLabel');
+  if (hostLabel) {
+    hostLabel.textContent = `Quality: ${preset.label} (Host Controlled)`;
+  }
 }
 
 /* ═══════════ FULLSCREEN (uses videoWrap for overlay persistence) ═══════════ */
